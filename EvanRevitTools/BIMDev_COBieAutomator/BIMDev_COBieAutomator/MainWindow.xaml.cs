@@ -1,8 +1,8 @@
 ﻿using System;
-using System.IO; // 負責讀取檔案路徑
+using System.Collections.Generic; // 用來存清單
+using System.IO;
 using System.Windows;
-using System.Windows.Controls; // 負責 UI 元件 (如 CheckBox)
-// 技巧：因為 WPF 和 Forms 都有 "Application" 或 "MessageBox"，為了避免打架，我們幫 Forms 取個外號叫 WinForms
+using System.Windows.Controls;
 using Autodesk.Revit.UI;
 using Autodesk.Revit.DB;
 using WinForms = System.Windows.Forms;
@@ -17,63 +17,143 @@ namespace BIMDev_COBieAutomator
         public MainWindow(UIDocument uidoc)
         {
             InitializeComponent();
-
-            // 3. 把傳進來的東西存起來
             _uidoc = uidoc;
             _doc = uidoc.Document;
-
-            // 4.順便更新介面上的「目前連接模型」文字
-            // Title 是模型的檔名
             TxtModelName.Text = _doc.Title;
         }
 
-        // 當按下「選擇資料夾」按鈕時會執行這裡
+        // 選擇資料夾按鈕
         private void BtnSelectFolder_Click(object sender, RoutedEventArgs e)
         {
-            // 1. 建立一個「選擇資料夾」的對話框
             WinForms.FolderBrowserDialog dialog = new WinForms.FolderBrowserDialog();
             dialog.Description = "請選擇包含 B 表 (Excel) 的資料夾";
 
-            // 2. 打開對話框，如果使用者按了「確定 (OK)」
             if (dialog.ShowDialog() == WinForms.DialogResult.OK)
             {
-                // 3. 取得使用者選的路徑
                 string selectedPath = dialog.SelectedPath;
-
-                // 4. 搜尋該資料夾下所有的 .xlsx 檔案
                 string[] excelFiles = Directory.GetFiles(selectedPath, "*.xlsx");
 
-                // 5. 如果沒找到檔案，跳出警告
                 if (excelFiles.Length == 0)
                 {
-                    MessageBox.Show("該資料夾內找不到任何 Excel (.xlsx) 檔案！", "找不到檔案", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    MessageBox.Show("該資料夾內找不到任何 Excel (.xlsx) 檔案！");
                     return;
                 }
 
-                // 6. 清空原本清單上的假資料
                 ListExcelFiles.Items.Clear();
-
-                // 7. 將找到的檔案變成 CheckBox 加進去
                 foreach (string file in excelFiles)
                 {
-                    // 建立一個勾選框
                     CheckBox cb = new CheckBox();
-
-                    // ★修正點：這裡必須指定是 System.IO.Path，不然會跟 Revit 的 Path 衝突
+                    // 這裡用 System.IO.Path 避免衝突
                     cb.Content = System.IO.Path.GetFileName(file);
-
-                    // 把「完整路徑」偷偷藏在 Tag 屬性裡，之後程式要讀檔時可以用
-                    cb.Tag = file;
-                    // 預設全部勾選
+                    cb.Tag = file; // 把完整路徑藏在 Tag 裡
                     cb.IsChecked = true;
-                    cb.Margin = new Thickness(2); // 讓間距好看一點
-
-                    // 加到介面上
+                    cb.Margin = new Thickness(2);
                     ListExcelFiles.Items.Add(cb);
                 }
+                MessageBox.Show($"成功讀取 {excelFiles.Length} 個檔案！");
+            }
+        }
 
-                // 提示使用者
-                MessageBox.Show($"成功讀取 {excelFiles.Length} 個檔案！", "讀取完成");
+        // ============================================================
+        // ★ 開始執行按鈕的邏輯
+        // ============================================================
+        private void BtnRun_Click(object sender, RoutedEventArgs e)
+        {
+            // 1. 檢查有沒有勾選任何檔案
+            List<string> filesToProcess = new List<string>();
+            foreach (CheckBox cb in ListExcelFiles.Items)
+            {
+                if (cb.IsChecked == true)
+                {
+                    // 從 Tag 拿出完整路徑
+                    filesToProcess.Add(cb.Tag.ToString());
+                }
+            }
+
+            if (filesToProcess.Count == 0)
+            {
+                MessageBox.Show("請至少勾選一個要處理的 Excel 檔案！");
+                return;
+            }
+
+            // 2. 準備開始統計
+            string report = "【預備導入分析報告】\n";
+            int totalElements = 0;
+
+            // 3. 逐一處理每個檔案
+            foreach (string filePath in filesToProcess)
+            {
+                // A. 從檔名分析出 Revit 的類別
+                BuiltInCategory targetCategory = GetCategoryFromFilename(filePath);
+
+                // ★ 修正點：使用 BuiltInCategory.INVALID
+                if (targetCategory == BuiltInCategory.INVALID)
+                {
+                    report += $"❌ 無法識別類別: {System.IO.Path.GetFileName(filePath)}\n";
+                    continue;
+                }
+
+                // B. 去模型裡搜尋該類別的所有元件
+                FilteredElementCollector collector = new FilteredElementCollector(_doc);
+                IList<Element> elements = collector.OfCategory(targetCategory)
+                                                   .WhereElementIsNotElementType()
+                                                   .ToElements();
+
+                report += $"✅ {System.IO.Path.GetFileName(filePath)}\n";
+                report += $"   對應類別: {targetCategory}\n";
+                report += $"   模型中數量: {elements.Count} 個元件\n\n";
+
+                totalElements += elements.Count;
+            }
+
+            // 4. 顯示報告
+            report += $"----------------------------\n總計找到 {totalElements} 個目標元件。";
+            MessageBox.Show(report, "測試連線報告");
+        }
+
+        // ============================================================
+        // ★ 核心方法：檔名翻譯機
+        // ============================================================
+        private BuiltInCategory GetCategoryFromFilename(string filePath)
+        {
+            string fileName = System.IO.Path.GetFileNameWithoutExtension(filePath);
+
+            // 抓最後一個橫線後面的字
+            // 例如 "設備清單_機電-Pipe Accessories" -> 抓 "Pipe Accessories"
+            string categoryName = "";
+            if (fileName.Contains("-"))
+            {
+                categoryName = fileName.Substring(fileName.LastIndexOf('-') + 1).Trim();
+            }
+            else
+            {
+                // 如果檔名沒有橫線，暫時無法判斷，回傳無效
+                return BuiltInCategory.INVALID;
+            }
+
+            switch (categoryName)
+            {
+                case "Pipe Accessories": return BuiltInCategory.OST_PipeAccessory;
+                case "Plumbing Fixtures": return BuiltInCategory.OST_PlumbingFixtures;
+                case "Mechanical Equipment": return BuiltInCategory.OST_MechanicalEquipment;
+                case "Communication Devices": return BuiltInCategory.OST_CommunicationDevices;
+                case "Conduit Fittings": return BuiltInCategory.OST_ConduitFitting;
+                case "Data Devices": return BuiltInCategory.OST_DataDevices;
+                case "Duct Accessories": return BuiltInCategory.OST_DuctAccessory;
+                case "Electrical Equipment": return BuiltInCategory.OST_ElectricalEquipment;
+                case "Electrical Fixtures": return BuiltInCategory.OST_ElectricalFixtures;
+                case "Fire Alarm Devices": return BuiltInCategory.OST_FireAlarmDevices;
+                case "Lighting Devices": return BuiltInCategory.OST_LightingDevices;
+                case "Lighting Fixtures": return BuiltInCategory.OST_LightingFixtures;
+                case "Pipe Fittings": return BuiltInCategory.OST_PipeFitting;
+                case "Sprinklers": return BuiltInCategory.OST_Sprinklers;
+                case "Air Terminals": return BuiltInCategory.OST_DuctTerminal;
+                case "Telephone Devices": return BuiltInCategory.OST_TelephoneDevices;
+                case "Security Devices": return BuiltInCategory.OST_SecurityDevices;
+                // 如果有更多，繼續加...
+
+                // ★ 修正點：使用 BuiltInCategory.INVALID
+                default: return BuiltInCategory.INVALID;
             }
         }
     }
