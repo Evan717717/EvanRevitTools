@@ -3,15 +3,28 @@ using System.IO; // 負責讀取檔案路徑
 using System.Windows;
 using System.Windows.Controls; // 負責 UI 元件 (如 CheckBox)
 // 技巧：因為 WPF 和 Forms 都有 "Application" 或 "MessageBox"，為了避免打架，我們幫 Forms 取個外號叫 WinForms
+using Autodesk.Revit.UI;
+using Autodesk.Revit.DB;
 using WinForms = System.Windows.Forms;
 
 namespace BIMDev_COBieAutomator
 {
     public partial class MainWindow : Window
     {
-        public MainWindow()
+        private UIDocument _uidoc;
+        private Document _doc;
+
+        public MainWindow(UIDocument uidoc)
         {
             InitializeComponent();
+
+            // 3. 把傳進來的東西存起來
+            _uidoc = uidoc;
+            _doc = uidoc.Document;
+
+            // 4.順便更新介面上的「目前連接模型」文字
+            // Title 是模型的檔名
+            TxtModelName.Text = _doc.Title;
         }
 
         // 當按下「選擇資料夾」按鈕時會執行這裡
@@ -45,8 +58,10 @@ namespace BIMDev_COBieAutomator
                 {
                     // 建立一個勾選框
                     CheckBox cb = new CheckBox();
-                    // 顯示名稱只顯示檔名 (不要顯示長長的路徑)
-                    cb.Content = Path.GetFileName(file);
+
+                    // ★修正點：這裡必須指定是 System.IO.Path，不然會跟 Revit 的 Path 衝突
+                    cb.Content = System.IO.Path.GetFileName(file);
+
                     // 把「完整路徑」偷偷藏在 Tag 屬性裡，之後程式要讀檔時可以用
                     cb.Tag = file;
                     // 預設全部勾選

@@ -49,7 +49,8 @@
 
         <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
             <TextBlock Text="準備就緒" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="Gray"/>
-            <Button Name="BtnRun" Content="🚀 開始執行導入" Width="120" Height="30" Background="#DDDDDD"/>
+            <Button Name="BtnRun" Content="🚀 開始執行導入" Width="120" Height="30" Background="#DDDDDD"
+                    Click="BtnRun_Click"/>
         </StackPanel>
     </Grid>
 </Window>
