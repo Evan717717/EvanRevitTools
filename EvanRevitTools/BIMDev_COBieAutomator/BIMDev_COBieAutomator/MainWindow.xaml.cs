@@ -7,6 +7,10 @@ using Autodesk.Revit.UI;
 using Autodesk.Revit.DB;
 using WinForms = System.Windows.Forms;
 
+// ★★★ 記得補上這兩行，不然讀 Excel 會報錯 ★★★
+using NPOI.SS.UserModel;
+using NPOI.XSSF.UserModel;
+
 namespace BIMDev_COBieAutomator
 {
     public partial class MainWindow : Window
@@ -55,60 +59,179 @@ namespace BIMDev_COBieAutomator
         }
 
         // ============================================================
-        // ★ 開始執行按鈕的邏輯
+        // ★ 開始執行按鈕的邏輯 (動態欄位版)
         // ============================================================
         private void BtnRun_Click(object sender, RoutedEventArgs e)
         {
-            // 1. 檢查有沒有勾選任何檔案
+            // 1. 取得勾選的檔案
             List<string> filesToProcess = new List<string>();
             foreach (CheckBox cb in ListExcelFiles.Items)
             {
-                if (cb.IsChecked == true)
+                if (cb.IsChecked == true) filesToProcess.Add(cb.Tag.ToString());
+            }
+
+            if (filesToProcess.Count == 0) return;
+
+            // 2. 開啟 Transaction
+            using (Transaction t = new Transaction(_doc, "COBie 自動化導入"))
+            {
+                t.Start();
+
+                string logReport = "【導入執行報告】\n";
+                int totalUpdateCount = 0;
+
+                try
                 {
-                    // 從 Tag 拿出完整路徑
-                    filesToProcess.Add(cb.Tag.ToString());
+                    foreach (string filePath in filesToProcess)
+                    {
+                        // A. 檔名判斷類別
+                        BuiltInCategory category = GetCategoryFromFilename(filePath);
+                        if (category == BuiltInCategory.INVALID) continue;
+
+                        // B. 抓取模型元件
+                        FilteredElementCollector collector = new FilteredElementCollector(_doc);
+                        IList<Element> revitElements = collector.OfCategory(category).WhereElementIsNotElementType().ToElements();
+
+                        if (revitElements.Count == 0)
+                        {
+                            logReport += $"⚠️ 跳過 (無元件): {System.IO.Path.GetFileName(filePath)}\n";
+                            continue;
+                        }
+
+                        // C. 開啟 Excel
+                        using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+                        {
+                            IWorkbook workbook = new XSSFWorkbook(fs);
+                            ISheet sheet = workbook.GetSheetAt(0);
+
+                            // ===================================================
+                            // ★ 第一階段：建立動態地圖 (掃描標題列)
+                            // ===================================================
+
+                            // 根據你的截圖，標題在第 2 列 (Row Index = 1)
+                            IRow headerRow = sheet.GetRow(1);
+                            if (headerRow == null) continue;
+
+                            // 字典：Key=參數名稱(如 Cobie_製造商), Value=欄位索引(如 6)
+                            Dictionary<string, int> parameterMap = new Dictionary<string, int>();
+
+                            // 橫向掃描所有格子
+                            for (int cellIndex = 0; cellIndex < headerRow.LastCellNum; cellIndex++)
+                            {
+                                string headerText = GetCellValue(headerRow, cellIndex);
+
+                                // 只要開頭是 "Cobie_"，就加入地圖
+                                if (!string.IsNullOrEmpty(headerText) && headerText.StartsWith("Cobie_"))
+                                {
+                                    parameterMap[headerText] = cellIndex;
+                                }
+                            }
+
+                            if (parameterMap.Count == 0)
+                            {
+                                logReport += $"❌ 失敗 (無Cobie欄位): {System.IO.Path.GetFileName(filePath)}\n";
+                                continue;
+                            }
+
+                            // ===================================================
+                            // ★ 第二階段：讀取資料並寫入
+                            // ===================================================
+
+                            // 根據你的截圖，資料從第 4 列開始 (Row Index = 3)
+                            for (int rowIndex = 3; rowIndex <= sheet.LastRowNum; rowIndex++)
+                            {
+                                IRow row = sheet.GetRow(rowIndex);
+                                if (row == null) continue;
+
+                                // 固定位置：A欄=Family, B欄=Type
+                                string xlsFamily = GetCellValue(row, 0);
+                                string xlsType = GetCellValue(row, 1);
+
+                                // 如果 Family 或 Type 是空的，代表這行沒資料，跳過
+                                if (string.IsNullOrEmpty(xlsFamily) || string.IsNullOrEmpty(xlsType)) continue;
+
+                                // 在 Revit 元件中尋找匹配者
+                                foreach (Element elem in revitElements)
+                                {
+                                    // 取得 Revit 元件的類型資訊
+                                    Element typeElem = _doc.GetElement(elem.GetTypeId());
+                                    if (typeElem == null) continue;
+
+                                    string revitType = typeElem.Name;
+                                    string revitFamily = typeElem.get_Parameter(BuiltInParameter.SYMBOL_FAMILY_NAME_PARAM).AsString();
+
+                                    // 比對名稱 (忽略大小寫)
+                                    if (revitFamily.Equals(xlsFamily, StringComparison.OrdinalIgnoreCase) &&
+                                        revitType.Equals(xlsType, StringComparison.OrdinalIgnoreCase))
+                                    {
+                                        // ★ 這裡是最精彩的地方：看地圖辦事
+                                        // 遍歷我們剛剛建立的 Map，有多少 Cobie 欄位就寫多少
+                                        foreach (var map in parameterMap)
+                                        {
+                                            string paramName = map.Key; // 例如 "Cobie_製造商"
+                                            int colIndex = map.Value;   // 例如 6
+
+                                            // 去那一行抓資料
+                                            string valueToWrite = GetCellValue(row, colIndex);
+
+                                            // 寫入 Revit
+                                            bool success = SetParameterValue(elem, paramName, valueToWrite);
+                                            if (success) totalUpdateCount++;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        logReport += $"✅ 完成: {System.IO.Path.GetFileName(filePath)}\n";
+                    }
+
+                    t.Commit();
+                    logReport += $"\n----------------\n總計更新了 {totalUpdateCount} 個參數欄位。";
+                    MessageBox.Show(logReport, "執行完成");
+                }
+                catch (Exception ex)
+                {
+                    t.RollBack();
+                    MessageBox.Show($"發生錯誤，已取消變更：\n{ex.Message}", "錯誤");
                 }
             }
+        }
 
-            if (filesToProcess.Count == 0)
+        // 輔助方法：安全地寫入參數
+        private bool SetParameterValue(Element elem, string paramName, string value)
+        {
+            if (string.IsNullOrEmpty(value)) return false;
+
+            // 嘗試找參數
+            Parameter param = elem.LookupParameter(paramName);
+
+            // 如果找不到參數，或參數是唯讀的，就寫不進去
+            if (param != null && !param.IsReadOnly)
             {
-                MessageBox.Show("請至少勾選一個要處理的 Excel 檔案！");
-                return;
-            }
-
-            // 2. 準備開始統計
-            string report = "【預備導入分析報告】\n";
-            int totalElements = 0;
-
-            // 3. 逐一處理每個檔案
-            foreach (string filePath in filesToProcess)
-            {
-                // A. 從檔名分析出 Revit 的類別
-                BuiltInCategory targetCategory = GetCategoryFromFilename(filePath);
-
-                // ★ 修正點：使用 BuiltInCategory.INVALID
-                if (targetCategory == BuiltInCategory.INVALID)
+                // 根據參數類型寫入 (大部分 Cobie 都是文字)
+                if (param.StorageType == StorageType.String)
                 {
-                    report += $"❌ 無法識別類別: {System.IO.Path.GetFileName(filePath)}\n";
-                    continue;
+                    param.Set(value);
+                    return true;
                 }
+            }
+            return false;
+        }
 
-                // B. 去模型裡搜尋該類別的所有元件
-                FilteredElementCollector collector = new FilteredElementCollector(_doc);
-                IList<Element> elements = collector.OfCategory(targetCategory)
-                                                   .WhereElementIsNotElementType()
-                                                   .ToElements();
+        // 輔助方法：讀取儲存格
+        private string GetCellValue(IRow row, int cellIndex)
+        {
+            ICell cell = row.GetCell(cellIndex);
+            if (cell == null) return "";
 
-                report += $"✅ {System.IO.Path.GetFileName(filePath)}\n";
-                report += $"   對應類別: {targetCategory}\n";
-                report += $"   模型中數量: {elements.Count} 個元件\n\n";
-
-                totalElements += elements.Count;
+            // ★ 修正點：加上全名 "NPOI.SS.UserModel.CellType" 避免跟 Revit 撞名
+            if (cell.CellType == NPOI.SS.UserModel.CellType.Formula)
+            {
+                try { return cell.StringCellValue; }
+                catch { return cell.NumericCellValue.ToString(); }
             }
 
-            // 4. 顯示報告
-            report += $"----------------------------\n總計找到 {totalElements} 個目標元件。";
-            MessageBox.Show(report, "測試連線報告");
+            return cell.ToString().Trim();
         }
 
         // ============================================================
@@ -119,7 +242,6 @@ namespace BIMDev_COBieAutomator
             string fileName = System.IO.Path.GetFileNameWithoutExtension(filePath);
 
             // 抓最後一個橫線後面的字
-            // 例如 "設備清單_機電-Pipe Accessories" -> 抓 "Pipe Accessories"
             string categoryName = "";
             if (fileName.Contains("-"))
             {
@@ -127,7 +249,6 @@ namespace BIMDev_COBieAutomator
             }
             else
             {
-                // 如果檔名沒有橫線，暫時無法判斷，回傳無效
                 return BuiltInCategory.INVALID;
             }
 
@@ -150,9 +271,7 @@ namespace BIMDev_COBieAutomator
                 case "Air Terminals": return BuiltInCategory.OST_DuctTerminal;
                 case "Telephone Devices": return BuiltInCategory.OST_TelephoneDevices;
                 case "Security Devices": return BuiltInCategory.OST_SecurityDevices;
-                // 如果有更多，繼續加...
 
-                // ★ 修正點：使用 BuiltInCategory.INVALID
                 default: return BuiltInCategory.INVALID;
             }
         }
