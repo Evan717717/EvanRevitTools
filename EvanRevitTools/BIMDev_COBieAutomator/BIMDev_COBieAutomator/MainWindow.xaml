@@ -1,0 +1,55 @@
+﻿<Window x:Class="BIMDev_COBieAutomator.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="COBie 自動化導入工具 - BIM Development" 
+        Height="450" Width="600"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize">
+
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="50"/>
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="2*"/>
+                <ColumnDefinition Width="1*"/>
+            </Grid.ColumnDefinitions>
+
+            <GroupBox Header="1. 選擇 Excel 來源 (B表)" Grid.Column="0" Margin="0,0,5,0">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+
+                    <Button Name="BtnSelectFolder" Content="📂 選擇資料夾..." Height="25" Margin="5" />
+
+                    <ListBox Name="ListExcelFiles" Grid.Row="1" Margin="5">
+                        <ListBoxItem>設備清單_機電-Pipe Accessories.xlsx</ListBoxItem>
+                        <ListBoxItem>設備清單_機電-Plumbing Fixtures.xlsx</ListBoxItem>
+                        <ListBoxItem>設備清單_機電-Mechanical Equipment.xlsx</ListBoxItem>
+                    </ListBox>
+                </Grid>
+            </GroupBox>
+
+            <GroupBox Header="2. 目標模型" Grid.Column="1" Margin="5,0,0,0">
+                <StackPanel Margin="5">
+                    <TextBlock Text="目前連接模型：" FontWeight="Bold" Margin="0,10,0,5"/>
+                    <TextBlock Name="TxtModelName" Text="尚未讀取" TextWrapping="Wrap" Foreground="Blue"/>
+
+                    <TextBlock Text="執行模式：" FontWeight="Bold" Margin="0,20,0,5"/>
+                    <RadioButton Content="僅寫入空白參數" IsChecked="True" Margin="0,2"/>
+                    <RadioButton Content="強制覆蓋現有值" Margin="0,2"/>
+                </StackPanel>
+            </GroupBox>
+        </Grid>
+
+        <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" VerticalAlignment="Center">
+            <TextBlock Text="準備就緒" VerticalAlignment="Center" Margin="0,0,10,0" Foreground="Gray"/>
+            <Button Name="BtnRun" Content="🚀 開始執行導入" Width="120" Height="30" Background="#DDDDDD"/>
+        </StackPanel>
+    </Grid>
+</Window>

@@ -16,15 +16,27 @@ namespace BIMDev_COBieAutomator
             ref string message,
             ElementSet elements)
         {
-            // 1. 取得 UI 應用程式與當前文件
+            // 1. 取得 UI 應用程式與當前文件 (雖然目前還沒用到，但保留著是好習慣)
             UIApplication uiapp = commandData.Application;
             UIDocument uidoc = uiapp.ActiveUIDocument;
 
-            // 2. 這是我們未來要呼叫 UI 視窗的地方
-            // 目前先用簡單的對話框測試環境是否成功
-            TaskDialog.Show("BIM Development", "系統連線成功！準備開始載入 COBie 自動化工具。");
+            // =======================================================
+            // 關鍵修改區：這裡是連接 MainWindow 的地方
+            // =======================================================
 
-            // 3. 回傳成功狀態
+            // 2. 實例化 (Instantiate) 我們的視窗
+            // 這行意思是：依照 MainWindow 的藍圖，造出一個真正的視窗物件
+            MainWindow myWindow = new MainWindow();
+
+            // 3. 顯示視窗
+            // ShowDialog() 的意思是「模態視窗 (Modal)」
+            // 當這個視窗打開時，使用者不能去點後面的 Revit，必須關閉視窗才能繼續操作
+            // 這對於這種資料導入工具來說比較安全
+            myWindow.ShowDialog();
+
+            // =======================================================
+
+            // 4. 回傳成功狀態 (視窗關閉後才會跑到這一行)
             return Result.Succeeded;
         }
     }
