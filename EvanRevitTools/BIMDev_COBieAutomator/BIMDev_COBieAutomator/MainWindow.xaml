@@ -25,7 +25,7 @@
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
 
-                    <Button Name="BtnSelectFolder" Content="📂 選擇資料夾..." Height="25" Margin="5" />
+                    <Button Name="BtnSelectFolder" Content="📂 選擇資料夾..." Height="25" Margin="5" Click="BtnSelectFolder_Click"/>
 
                     <ListBox Name="ListExcelFiles" Grid.Row="1" Margin="5">
                         <ListBoxItem>設備清單_機電-Pipe Accessories.xlsx</ListBoxItem>
