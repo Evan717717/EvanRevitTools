@@ -120,10 +120,18 @@ namespace BIMDev_COBieAutomator
                             {
                                 string headerText = GetCellValue(headerRow, cellIndex);
 
-                                // 只要開頭是 "Cobie_"，就加入地圖
-                                if (!string.IsNullOrEmpty(headerText) && headerText.StartsWith("Cobie_"))
+                                // --- 修改後的寫法：強制轉成 COBie ---
+                                if (!string.IsNullOrEmpty(headerText) && headerText.StartsWith("Cobie_", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    parameterMap[headerText] = cellIndex;
+                                    // 1. 取得後面的名字 (例如 "製造商")
+                                    // Substring(6) 的意思是切掉前面 6 個字元 ("Cobie_")
+                                    string suffix = headerText.Substring(6);
+
+                                    // 2. 重新組合成 Revit 認得的標準寫法 ("COBie_" + "製造商")
+                                    string correctRevitName = "COBie_" + suffix;
+
+                                    // 3. 存入地圖
+                                    parameterMap[correctRevitName] = cellIndex;
                                 }
                             }
 
@@ -192,7 +200,8 @@ namespace BIMDev_COBieAutomator
                 catch (Exception ex)
                 {
                     t.RollBack();
-                    MessageBox.Show($"發生錯誤，已取消變更：\n{ex.Message}", "錯誤");
+                    // ToString() 會顯示詳細的錯誤位置 (行數)
+                    MessageBox.Show($"發生錯誤！\n\n錯誤原因：{ex.Message}\n\n錯誤位置：\n{ex.ToString()}", "除錯模式");
                 }
             }
         }
