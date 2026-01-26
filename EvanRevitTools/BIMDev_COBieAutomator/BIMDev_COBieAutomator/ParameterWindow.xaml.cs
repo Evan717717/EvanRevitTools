@@ -27,7 +27,7 @@ namespace BIMDev_COBieAutomator
             LoadAllRevitCategories();
         }
 
-        // 1. 載入 Categories (保持之前的優化邏輯)
+        // 1. 載入 Categories
         private void LoadAllRevitCategories()
         {
             ListCategories.Items.Clear();
@@ -70,7 +70,79 @@ namespace BIMDev_COBieAutomator
                    bic == BuiltInCategory.OST_LightingFixtures;
         }
 
-        // 2. 選擇檔案
+        // ============================================================
+        // ★ 新增：分頁切換與搜尋事件 (作法 B 核心)
+        // ============================================================
+
+        // 當使用者切換分頁時觸發
+        private void MainTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            // 確保是 TabControl 本身觸發的，避免被內部的 ListBox 干擾
+            if (e.Source is TabControl)
+            {
+                // 如果切換到「移除參數」分頁 (TabRemove)，自動掃描專案
+                if (TabRemove != null && TabRemove.IsSelected)
+                {
+                    ScanProjectParameters();
+                }
+            }
+        }
+
+        // 手動點擊「掃描專案」按鈕
+        private void BtnScanProject_Click(object sender, RoutedEventArgs e)
+        {
+            ScanProjectParameters();
+        }
+
+        // ★ 核心邏輯：直接掃描專案參數 (不需要 TXT)
+        private void ScanProjectParameters()
+        {
+            ListParamsToRemove.Items.Clear();
+            string keyword = TxtRemoveFilter.Text.Trim(); // 取得關鍵字，預設 "COBie"
+
+            // 取得專案中所有的參數綁定
+            BindingMap map = _doc.ParameterBindings;
+            DefinitionBindingMapIterator it = map.ForwardIterator();
+            it.Reset();
+
+            List<Definition> foundDefs = new List<Definition>();
+
+            while (it.MoveNext())
+            {
+                Definition def = it.Key;
+
+                // 過濾邏輯：
+                // 1. 名字包含關鍵字 (忽略大小寫)
+                // 2. 如果沒輸入關鍵字，就列出全部 (由使用者自行決定)
+                if (!string.IsNullOrEmpty(keyword))
+                {
+                    if (def.Name.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        foundDefs.Add(def);
+                    }
+                }
+                else
+                {
+                    foundDefs.Add(def);
+                }
+            }
+
+            // 排序並顯示
+            var sortedDefs = foundDefs.OrderBy(d => d.Name).ToList();
+
+            foreach (Definition def in sortedDefs)
+            {
+                CheckBox cb = new CheckBox();
+                cb.Content = def.Name;
+                cb.Tag = def; // 藏 Definition 物件，之後刪除要用
+                cb.IsChecked = false; // 預設不勾選
+                ListParamsToRemove.Items.Add(cb);
+            }
+        }
+
+        // ============================================================
+        // TXT 檔案讀取區 (Tab 1 專用)
+        // ============================================================
         private void BtnSelectFile_Click(object sender, RoutedEventArgs e)
         {
             WinForms.OpenFileDialog openFileDialog = new WinForms.OpenFileDialog();
@@ -96,7 +168,6 @@ namespace BIMDev_COBieAutomator
                     {
                         CmbGroups.Items.Add(group.Name);
                     }
-                    // 自動選取 COBie
                     if (CmbGroups.Items.Contains("COBie")) CmbGroups.SelectedItem = "COBie";
                     else if (CmbGroups.Items.Count > 0) CmbGroups.SelectedIndex = 0;
                 }
@@ -111,7 +182,6 @@ namespace BIMDev_COBieAutomator
             }
         }
 
-        // 3. 當群組改變時，刷新「新增」與「移除」清單
         private void CmbGroups_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (CmbGroups.SelectedItem == null) return;
@@ -119,11 +189,11 @@ namespace BIMDev_COBieAutomator
             RefreshParameterLists(groupName);
         }
 
-        // ★ 核心邏輯：比對 TXT 與 Revit 現況
+        // ★ 修改後的核心邏輯：只負責刷新 Tab 1 (新增清單)
         private void RefreshParameterLists(string groupName)
         {
             ListParamsToAdd.Items.Clear();
-            ListParamsToRemove.Items.Clear();
+            // 注意：這裡不再操作 ListParamsToRemove，因為那是 Tab 2 的工作
 
             string spPath = TxtSharedParamPath.Text;
             if (string.IsNullOrEmpty(spPath)) return;
@@ -136,18 +206,17 @@ namespace BIMDev_COBieAutomator
                 DefinitionGroup group = spFile.Groups.get_Item(groupName);
                 if (group == null) return;
 
-                // 讀取群組內所有參數定義
                 foreach (Definition def in group.Definitions)
                 {
                     bool existsInProject = _doc.ParameterBindings.Contains(def);
 
                     // --- 處理「新增清單」 ---
                     CheckBox cbAdd = new CheckBox();
-                    cbAdd.Tag = def; // 藏 Definition 物件
+                    cbAdd.Tag = def;
 
                     if (existsInProject)
                     {
-                        // 已存在：變灰、不能勾選、顯示(已存在)
+                        // 已存在：變灰、不能勾選
                         cbAdd.Content = $"{def.Name} (已存在)";
                         cbAdd.Foreground = Brushes.Gray;
                         cbAdd.IsEnabled = false;
@@ -155,35 +224,23 @@ namespace BIMDev_COBieAutomator
                     }
                     else
                     {
-                        // 不存在：正常顯示、預設勾選
+                        // 不存在：正常顯示
                         cbAdd.Content = def.Name;
                         cbAdd.Foreground = Brushes.Black;
                         cbAdd.IsEnabled = true;
                         cbAdd.IsChecked = true;
                     }
                     ListParamsToAdd.Items.Add(cbAdd);
-
-                    // --- 處理「移除清單」 ---
-                    if (existsInProject)
-                    {
-                        // 只有存在的才能移除
-                        CheckBox cbRemove = new CheckBox();
-                        cbRemove.Content = def.Name;
-                        cbRemove.Tag = def;
-                        cbRemove.IsChecked = false; // 預設不勾選移除 (安全)
-                        ListParamsToRemove.Items.Add(cbRemove);
-                    }
                 }
             }
             catch { }
         }
 
         // ============================================================
-        // 執行新增 (只新增使用者勾選的)
+        // 執行新增
         // ============================================================
         private void BtnCreate_Click(object sender, RoutedEventArgs e)
         {
-            // 收集 Category
             CategorySet catSet = _app.Create.NewCategorySet();
             foreach (CheckBox cb in ListCategories.Items)
             {
@@ -191,7 +248,6 @@ namespace BIMDev_COBieAutomator
             }
             if (catSet.IsEmpty) { MessageBox.Show("請至少勾選一個 Category！"); return; }
 
-            // 收集要新增的 Definition
             List<Definition> defsToAdd = new List<Definition>();
             foreach (CheckBox cb in ListParamsToAdd.Items)
             {
@@ -212,13 +268,11 @@ namespace BIMDev_COBieAutomator
                 {
                     foreach (Definition def in defsToAdd)
                     {
-                        // 雙重檢查 (怕使用者中途有人改了模型)
                         if (_doc.ParameterBindings.Contains(def)) continue;
 
                         InstanceBinding binding = _app.Create.NewInstanceBinding(catSet);
                         if (_doc.ParameterBindings.Insert(def, binding, BuiltInParameterGroup.PG_DATA))
                         {
-                            // 設定 Vary by Group
                             var map = _doc.ParameterBindings;
                             var it = map.ForwardIterator();
                             it.Reset();
@@ -239,8 +293,9 @@ namespace BIMDev_COBieAutomator
                     t.Commit();
                     MessageBox.Show($"成功新增 {count} 個參數！");
 
-                    // 執行完畢後，重新整理清單 (讓剛剛新增的變成灰色)
-                    RefreshParameterLists(CmbGroups.SelectedItem.ToString());
+                    // 執行完畢後，重新整理 Tab 1
+                    if (CmbGroups.SelectedItem != null)
+                        RefreshParameterLists(CmbGroups.SelectedItem.ToString());
                 }
                 catch (Exception ex)
                 {
@@ -251,7 +306,7 @@ namespace BIMDev_COBieAutomator
         }
 
         // ============================================================
-        // 執行移除
+        // 執行移除 (修改版：搭配 ScanProjectParameters)
         // ============================================================
         private void BtnRemove_Click(object sender, RoutedEventArgs e)
         {
@@ -277,7 +332,6 @@ namespace BIMDev_COBieAutomator
                 {
                     foreach (Definition def in defsToRemove)
                     {
-                        // API 移除參數的方法
                         try
                         {
                             _doc.ParameterBindings.Remove(def);
@@ -288,8 +342,12 @@ namespace BIMDev_COBieAutomator
                     t.Commit();
                     MessageBox.Show($"成功移除 {count} 個參數！");
 
-                    // 執行完畢後，重新整理清單 (讓剛剛移除的變回可新增狀態)
-                    RefreshParameterLists(CmbGroups.SelectedItem.ToString());
+                    // 執行完畢後，重新掃描 Tab 2
+                    ScanProjectParameters();
+
+                    // 如果 Tab 1 也有選群組，順便刷新一下 (讓灰色變回黑色)
+                    if (CmbGroups.SelectedItem != null)
+                        RefreshParameterLists(CmbGroups.SelectedItem.ToString());
                 }
                 catch (Exception ex)
                 {
@@ -302,15 +360,12 @@ namespace BIMDev_COBieAutomator
         // ============================================================
         // 全選/全不選按鈕事件
         // ============================================================
-        // 新增參數區
         private void BtnSelectAllParams_Click(object sender, RoutedEventArgs e) { SetAllChecks(ListParamsToAdd, true); }
         private void BtnUnselectAllParams_Click(object sender, RoutedEventArgs e) { SetAllChecks(ListParamsToAdd, false); }
 
-        // Category 區
         private void BtnSelectAllCats_Click(object sender, RoutedEventArgs e) { SetAllChecks(ListCategories, true); }
         private void BtnUnselectAllCats_Click(object sender, RoutedEventArgs e) { SetAllChecks(ListCategories, false); }
 
-        // 移除參數區
         private void BtnSelectAllRemove_Click(object sender, RoutedEventArgs e) { SetAllChecks(ListParamsToRemove, true); }
         private void BtnUnselectAllRemove_Click(object sender, RoutedEventArgs e) { SetAllChecks(ListParamsToRemove, false); }
 
