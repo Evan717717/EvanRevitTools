@@ -46,24 +46,42 @@ namespace BIMDev_COBieAutomator
                 ListExcelFiles.Items.Clear();
                 foreach (string file in excelFiles)
                 {
+                    // ★ 優化點：過濾掉 Office 的暫存檔 (檔名以 ~$ 開頭)
+                    string fileName = System.IO.Path.GetFileName(file);
+                    if (fileName.StartsWith("~$")) continue;
+
                     CheckBox cb = new CheckBox();
-                    // 這裡用 System.IO.Path 避免衝突
-                    cb.Content = System.IO.Path.GetFileName(file);
-                    cb.Tag = file; // 把完整路徑藏在 Tag 裡
+                    cb.Content = fileName;
+                    cb.Tag = file;
                     cb.IsChecked = true;
                     cb.Margin = new Thickness(2);
                     ListExcelFiles.Items.Add(cb);
                 }
-                MessageBox.Show($"成功讀取 {excelFiles.Length} 個檔案！");
+                MessageBox.Show($"成功讀取 {ListExcelFiles.Items.Count} 個檔案！"); // 這裡改用 Items.Count 比較準
+            }
+        }
+        // 全選按鈕
+        private void BtnSelectAll_Click(object sender, RoutedEventArgs e)
+        {
+            foreach (CheckBox cb in ListExcelFiles.Items)
+            {
+                cb.IsChecked = true;
             }
         }
 
+        // 全不選按鈕
+        private void BtnUnselectAll_Click(object sender, RoutedEventArgs e)
+        {
+            foreach (CheckBox cb in ListExcelFiles.Items)
+            {
+                cb.IsChecked = false;
+            }
+        }
         // ============================================================
         // ★ 開始執行按鈕的邏輯 (動態欄位版)
         // ============================================================
         private void BtnRun_Click(object sender, RoutedEventArgs e)
         {
-            // 1. 取得勾選的檔案
             List<string> filesToProcess = new List<string>();
             foreach (CheckBox cb in ListExcelFiles.Items)
             {
@@ -72,136 +90,132 @@ namespace BIMDev_COBieAutomator
 
             if (filesToProcess.Count == 0) return;
 
-            // 2. 開啟 Transaction
+            // ★ 1. 取得使用者的設定：是否只寫入空白？
+            // 如果 RbOnlyFillBlank 被勾選，這個變數就是 true
+            bool onlyFillBlank = (RbOnlyFillBlank.IsChecked == true);
+
             using (Transaction t = new Transaction(_doc, "COBie 自動化導入"))
             {
                 t.Start();
 
-                string logReport = "【導入執行報告】\n";
+                System.Text.StringBuilder log = new System.Text.StringBuilder();
+                log.AppendLine("【詳細執行報告】");
+                if (onlyFillBlank) log.AppendLine("※ 模式：僅寫入空白參數 (保留既有值)");
+                else log.AppendLine("※ 模式：強制覆蓋現有值");
+                log.AppendLine("--------------------------------");
+
                 int totalUpdateCount = 0;
 
                 try
                 {
                     foreach (string filePath in filesToProcess)
                     {
-                        // A. 檔名判斷類別
+                        string fileName = System.IO.Path.GetFileName(filePath);
                         BuiltInCategory category = GetCategoryFromFilename(filePath);
                         if (category == BuiltInCategory.INVALID) continue;
 
-                        // B. 抓取模型元件
                         FilteredElementCollector collector = new FilteredElementCollector(_doc);
                         IList<Element> revitElements = collector.OfCategory(category).WhereElementIsNotElementType().ToElements();
 
                         if (revitElements.Count == 0)
                         {
-                            logReport += $"⚠️ 跳過 (無元件): {System.IO.Path.GetFileName(filePath)}\n";
+                            log.AppendLine($"⚠️ 跳過 (模型無元件): {fileName}");
                             continue;
                         }
 
-                        // C. 開啟 Excel
-                        using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+                        // 多加一個參數 FileShare.ReadWrite，告訴電腦：「就算別人正在用，也讓我讀一下」
+                        using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
                         {
                             IWorkbook workbook = new XSSFWorkbook(fs);
                             ISheet sheet = workbook.GetSheetAt(0);
 
-                            // ===================================================
-                            // ★ 第一階段：建立動態地圖 (掃描標題列)
-                            // ===================================================
-
-                            // 根據你的截圖，標題在第 2 列 (Row Index = 1)
                             IRow headerRow = sheet.GetRow(1);
                             if (headerRow == null) continue;
 
-                            // 字典：Key=參數名稱(如 Cobie_製造商), Value=欄位索引(如 6)
                             Dictionary<string, int> parameterMap = new Dictionary<string, int>();
 
-                            // 橫向掃描所有格子
                             for (int cellIndex = 0; cellIndex < headerRow.LastCellNum; cellIndex++)
                             {
-                                string headerText = GetCellValue(headerRow, cellIndex);
-
-                                // --- 修改後的寫法：強制轉成 COBie ---
+                                string headerText = GetCellValue(headerRow, cellIndex).Trim();
                                 if (!string.IsNullOrEmpty(headerText) && headerText.StartsWith("Cobie_", StringComparison.OrdinalIgnoreCase))
                                 {
-                                    // 1. 取得後面的名字 (例如 "製造商")
-                                    // Substring(6) 的意思是切掉前面 6 個字元 ("Cobie_")
                                     string suffix = headerText.Substring(6);
-
-                                    // 2. 重新組合成 Revit 認得的標準寫法 ("COBie_" + "製造商")
                                     string correctRevitName = "COBie_" + suffix;
-
-                                    // 3. 存入地圖
                                     parameterMap[correctRevitName] = cellIndex;
                                 }
                             }
 
                             if (parameterMap.Count == 0)
                             {
-                                logReport += $"❌ 失敗 (無Cobie欄位): {System.IO.Path.GetFileName(filePath)}\n";
+                                log.AppendLine($"❌ 失敗 (無Cobie欄位): {fileName}");
                                 continue;
                             }
 
-                            // ===================================================
-                            // ★ 第二階段：讀取資料並寫入
-                            // ===================================================
+                            int fileUpdateCount = 0;
 
-                            // 根據你的截圖，資料從第 4 列開始 (Row Index = 3)
                             for (int rowIndex = 3; rowIndex <= sheet.LastRowNum; rowIndex++)
                             {
                                 IRow row = sheet.GetRow(rowIndex);
                                 if (row == null) continue;
 
-                                // 固定位置：A欄=Family, B欄=Type
-                                string xlsFamily = GetCellValue(row, 0);
-                                string xlsType = GetCellValue(row, 1);
+                                string xlsFamily = GetCellValue(row, 0).Trim();
+                                string xlsType = GetCellValue(row, 1).Trim();
 
-                                // 如果 Family 或 Type 是空的，代表這行沒資料，跳過
                                 if (string.IsNullOrEmpty(xlsFamily) || string.IsNullOrEmpty(xlsType)) continue;
 
-                                // 在 Revit 元件中尋找匹配者
                                 foreach (Element elem in revitElements)
                                 {
-                                    // 取得 Revit 元件的類型資訊
                                     Element typeElem = _doc.GetElement(elem.GetTypeId());
                                     if (typeElem == null) continue;
 
                                     string revitType = typeElem.Name;
                                     string revitFamily = typeElem.get_Parameter(BuiltInParameter.SYMBOL_FAMILY_NAME_PARAM).AsString();
 
-                                    // 比對名稱 (忽略大小寫)
                                     if (revitFamily.Equals(xlsFamily, StringComparison.OrdinalIgnoreCase) &&
                                         revitType.Equals(xlsType, StringComparison.OrdinalIgnoreCase))
                                     {
-                                        // ★ 這裡是最精彩的地方：看地圖辦事
-                                        // 遍歷我們剛剛建立的 Map，有多少 Cobie 欄位就寫多少
                                         foreach (var map in parameterMap)
                                         {
-                                            string paramName = map.Key; // 例如 "Cobie_製造商"
-                                            int colIndex = map.Value;   // 例如 6
+                                            string paramName = map.Key;
+                                            int colIndex = map.Value;
+                                            string rawValue = GetCellValue(row, colIndex).Trim();
 
-                                            // 去那一行抓資料
-                                            string valueToWrite = GetCellValue(row, colIndex);
+                                            // ★ 2. 優化邏輯：如果 Excel 是空的，自動變成 "─"
+                                            string valueToWrite = string.IsNullOrEmpty(rawValue) ? "─" : rawValue;
 
-                                            // 寫入 Revit
-                                            bool success = SetParameterValue(elem, paramName, valueToWrite);
-                                            if (success) totalUpdateCount++;
+                                            Parameter param = elem.LookupParameter(paramName);
+                                            if (param == null || param.IsReadOnly) continue;
+
+                                            // ★ 3. 優化邏輯：判斷是否要覆蓋
+                                            // 如果模式是「僅寫入空白」，且參數原本就有值 (HasValue 且不是空字串)，就跳過不寫
+                                            if (onlyFillBlank)
+                                            {
+                                                if (param.HasValue && !string.IsNullOrEmpty(param.AsString()))
+                                                {
+                                                    continue; // 跳過，保留原值
+                                                }
+                                            }
+
+                                            // 寫入
+                                            param.Set(valueToWrite);
+                                            fileUpdateCount++;
+                                            totalUpdateCount++;
                                         }
                                     }
                                 }
                             }
+                            log.AppendLine($"✅ 完成: {fileName} (更新 {fileUpdateCount} 筆)");
                         }
-                        logReport += $"✅ 完成: {System.IO.Path.GetFileName(filePath)}\n";
                     }
 
                     t.Commit();
-                    logReport += $"\n----------------\n總計更新了 {totalUpdateCount} 個參數欄位。";
-                    MessageBox.Show(logReport, "執行完成");
+                    log.AppendLine($"\n總計更新了 {totalUpdateCount} 個參數欄位。");
+                    MessageBox.Show(log.ToString(), "執行完成");
                 }
                 catch (Exception ex)
                 {
                     t.RollBack();
-                    // ToString() 會顯示詳細的錯誤位置 (行數)
-                    MessageBox.Show($"發生錯誤！\n\n錯誤原因：{ex.Message}\n\n錯誤位置：\n{ex.ToString()}", "除錯模式");
+                    MessageBox.Show($"發生錯誤：\n{ex.ToString()}", "錯誤");
                 }
             }
         }

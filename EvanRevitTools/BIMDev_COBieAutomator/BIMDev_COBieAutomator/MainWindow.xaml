@@ -23,15 +23,17 @@
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <Button Name="BtnSelectFolder" Content="📂 選擇資料夾..." Height="25" Margin="5" Click="BtnSelectFolder_Click"/>
+                    <Button Name="BtnSelectFolder" Content="📂 選擇資料夾..." Height="25" Margin="5" Click="BtnSelectFolder_Click" />
 
-                    <ListBox Name="ListExcelFiles" Grid.Row="1" Margin="5">
-                        <ListBoxItem>設備清單_機電-Pipe Accessories.xlsx</ListBoxItem>
-                        <ListBoxItem>設備清單_機電-Plumbing Fixtures.xlsx</ListBoxItem>
-                        <ListBoxItem>設備清單_機電-Mechanical Equipment.xlsx</ListBoxItem>
-                    </ListBox>
+                    <ListBox Name="ListExcelFiles" Grid.Row="1" Margin="5"/>
+
+                    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="5">
+                        <Button Content="全選" Width="50" Margin="0,0,5,0" Click="BtnSelectAll_Click"/>
+                        <Button Content="全不選" Width="50" Click="BtnUnselectAll_Click"/>
+                    </StackPanel>
                 </Grid>
             </GroupBox>
 
@@ -41,8 +43,8 @@
                     <TextBlock Name="TxtModelName" Text="尚未讀取" TextWrapping="Wrap" Foreground="Blue"/>
 
                     <TextBlock Text="執行模式：" FontWeight="Bold" Margin="0,20,0,5"/>
-                    <RadioButton Content="僅寫入空白參數" IsChecked="True" Margin="0,2"/>
-                    <RadioButton Content="強制覆蓋現有值" Margin="0,2"/>
+                    <RadioButton Name="RbOnlyFillBlank" Content="僅寫入空白參數" IsChecked="True" Margin="0,2"/>
+                    <RadioButton Name="RbForceOverwrite" Content="強制覆蓋現有值" Margin="0,2"/>
                 </StackPanel>
             </GroupBox>
         </Grid>
