@@ -75,9 +75,16 @@
                                     <TextBox Name="TxtSharedParamPath_Batch" IsReadOnly="True" Height="23" Text="請選擇共用參數檔 (.txt)..." Foreground="Gray"/>
                                     <Button Name="BtnSelectSPFile" Content="瀏覽..." Grid.Column="1" Width="50" Margin="5,0,0,0" Click="BtnSelectSPFile_Click"/>
                                 </Grid>
+
                                 <StackPanel Orientation="Horizontal" Margin="0,5,0,0" Name="PanelParamOpts" IsEnabled="False">
+                                    <TextBlock Text="綁定對象:" VerticalAlignment="Center"/>
+                                    <ComboBox Name="CmbCategoryMode" Width="120" Margin="5,0,10,0" Height="22" SelectedIndex="0">
+                                        <ComboBoxItem Content="MEP 常用類別"/>
+                                        <ComboBoxItem Content="所有模型類別 (All)"/>
+                                    </ComboBox>
+
                                     <TextBlock Text="群組:" VerticalAlignment="Center"/>
-                                    <ComboBox Name="CmbGroups_Batch" Width="100" Margin="5,0,10,0" Height="22"/>
+                                    <ComboBox Name="CmbGroups_Batch" Width="80" Margin="5,0,10,0" Height="22"/>
                                     <CheckBox Name="CbVary_Batch" Content="Vary by Group" IsChecked="True" VerticalAlignment="Center"/>
                                 </StackPanel>
                             </StackPanel>

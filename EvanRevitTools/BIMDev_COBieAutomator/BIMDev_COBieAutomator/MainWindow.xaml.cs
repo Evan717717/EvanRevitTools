@@ -178,13 +178,15 @@ namespace BIMDev_COBieAutomator
             string spPath = TxtSharedParamPath_Batch.Text;
             string spGroup = CmbGroups_Batch.SelectedItem?.ToString();
             bool spVary = CbVary_Batch.IsChecked == true;
+            
+            // ★ 新增：讀取綁定模式 (0=MEP, 1=All)
+            bool bindToAll = (CmbCategoryMode.SelectedIndex == 1);
 
             if (doCreateParam && (string.IsNullOrEmpty(spPath) || File.Exists(spPath) == false))
             {
                 MessageBox.Show("請選擇有效的共用參數檔 (.txt)！"); return;
             }
 
-            // 使用 _uiapp.Application
             Autodesk.Revit.ApplicationServices.Application app = _uiapp.Application;
 
             System.Text.StringBuilder batchLog = new System.Text.StringBuilder();
@@ -197,18 +199,17 @@ namespace BIMDev_COBieAutomator
 
                 try
                 {
-                    // 背景開啟模型
                     Document bgDoc = app.OpenDocumentFile(rvtPath);
 
                     using (Transaction t = new Transaction(bgDoc, "批次自動化作業"))
                     {
                         t.Start();
 
-                        // --- 步驟 A: 建立參數 (如果勾選) ---
+                        // --- 步驟 A: 建立參數 ---
                         if (doCreateParam)
                         {
-                            // 這裡會自動判斷：如果參數已存在，就會跳過 (不會報錯)，然後繼續往下執行
-                            string paramLog = RunBatchParameterCreation(bgDoc, app, spPath, spGroup, spVary);
+                            // ★ 傳入 bindToAll 參數
+                            string paramLog = RunBatchParameterCreation(bgDoc, app, spPath, spGroup, spVary, bindToAll);
                             batchLog.AppendLine($"   ⚙️ 參數檢查/建立: {paramLog}");
                         }
 
@@ -323,9 +324,10 @@ namespace BIMDev_COBieAutomator
         }
 
         // ============================================================
-        // 引擎 2: 參數建立 (包含自動略過邏輯)
         // ============================================================
-        private string RunBatchParameterCreation(Document doc, Autodesk.Revit.ApplicationServices.Application app, string txtPath, string groupName, bool isVary)
+        // 引擎 2: 參數建立 (升級版：支援全類別)
+        // ============================================================
+        private string RunBatchParameterCreation(Document doc, Autodesk.Revit.ApplicationServices.Application app, string txtPath, string groupName, bool isVary, bool bindToAll)
         {
             try
             {
@@ -336,28 +338,47 @@ namespace BIMDev_COBieAutomator
                 DefinitionGroup group = spFile.Groups.get_Item(groupName);
                 if (group == null) return $"找不到群組 {groupName}";
 
-                // 自動綁定到常用類別
+                // 準備 CategorySet
                 CategorySet catSet = app.Create.NewCategorySet();
-                BuiltInCategory[] cats = new BuiltInCategory[] {
-                    BuiltInCategory.OST_PipeAccessory, BuiltInCategory.OST_MechanicalEquipment,
-                    BuiltInCategory.OST_ElectricalFixtures, BuiltInCategory.OST_PlumbingFixtures,
-                    BuiltInCategory.OST_DuctAccessory, BuiltInCategory.OST_ElectricalEquipment,
-                    BuiltInCategory.OST_CableTray, BuiltInCategory.OST_Conduit,
-                    BuiltInCategory.OST_Sprinklers, BuiltInCategory.OST_LightingFixtures,
-                    BuiltInCategory.OST_CommunicationDevices, BuiltInCategory.OST_FireAlarmDevices,
-                    BuiltInCategory.OST_DataDevices, BuiltInCategory.OST_SecurityDevices,
-                    BuiltInCategory.OST_Doors, BuiltInCategory.OST_Windows
-                };
 
-                foreach (var bic in cats)
+                if (bindToAll)
                 {
-                    try { catSet.Insert(doc.Settings.Categories.get_Item(bic)); } catch { }
+                    // ★ 模式 A: 綁定所有模型類別 (比照 Phase 3)
+                    foreach (Category cat in doc.Settings.Categories)
+                    {
+                        // 只要允許綁定參數，且是模型類別，就加入
+                        // 這裡加一個簡單的過濾，避免系統雜項
+                        if (cat.AllowsBoundParameters &&
+                            (cat.CategoryType == CategoryType.Model) &&
+                            cat.CanAddSubcategory)
+                        {
+                            catSet.Insert(cat);
+                        }
+                    }
+                }
+                else
+                {
+                    // ★ 模式 B: 僅綁定 MEP 常用類別 (原本的邏輯)
+                    BuiltInCategory[] cats = new BuiltInCategory[] {
+                        BuiltInCategory.OST_PipeAccessory, BuiltInCategory.OST_MechanicalEquipment,
+                        BuiltInCategory.OST_ElectricalFixtures, BuiltInCategory.OST_PlumbingFixtures,
+                        BuiltInCategory.OST_DuctAccessory, BuiltInCategory.OST_ElectricalEquipment,
+                        BuiltInCategory.OST_CableTray, BuiltInCategory.OST_Conduit,
+                        BuiltInCategory.OST_Sprinklers, BuiltInCategory.OST_LightingFixtures,
+                        BuiltInCategory.OST_CommunicationDevices, BuiltInCategory.OST_FireAlarmDevices,
+                        BuiltInCategory.OST_DataDevices, BuiltInCategory.OST_SecurityDevices,
+                        BuiltInCategory.OST_Doors, BuiltInCategory.OST_Windows,
+                        BuiltInCategory.OST_Walls, BuiltInCategory.OST_Floors // 多加幾個常用的
+                    };
+                    foreach (var bic in cats)
+                    {
+                        try { catSet.Insert(doc.Settings.Categories.get_Item(bic)); } catch { }
+                    }
                 }
 
                 int count = 0;
                 foreach (Definition def in group.Definitions)
                 {
-                    // ★★★ 如果參數已存在，直接跳過 (這就是你要的邏輯) ★★★
                     if (doc.ParameterBindings.Contains(def)) continue;
 
                     InstanceBinding binding = app.Create.NewInstanceBinding(catSet);
