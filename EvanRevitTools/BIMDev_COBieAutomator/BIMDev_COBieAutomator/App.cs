@@ -53,6 +53,7 @@ namespace BIMDev_COBieAutomator
                 assemblyPath,           // DLL 路徑
                 "BIMDev_COBieAutomator.Command" // 對應的 C# 類別全名 (Namespace.Class)
             );
+            btnData1.AvailabilityClassName = "BIMDev_COBieAutomator.CommandAvailability";
             btnData1.ToolTip = "讀取 Excel B表並寫入 Revit 元件參數";
 
             // =======================================================

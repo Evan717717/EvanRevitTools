@@ -15,25 +15,33 @@ namespace BIMDev_COBieAutomator
             ref string message,
             ElementSet elements)
         {
-            // 1. 取得 UI 應用程式與當前文件
+            // 1. 取得 UI 應用程式
             UIApplication uiapp = commandData.Application;
-            UIDocument uidoc = uiapp.ActiveUIDocument;
 
-            // =======================================================
-            // 關鍵修正：把 uidoc 傳進去！
-            // =======================================================
-            if (uidoc == null)
+            try
             {
-                TaskDialog.Show("錯誤", "請先開啟一個 Revit 專案模型 (.rvt) 才能使用此工具！");
-                return Result.Cancelled; // 回傳取消，結束程式
+                // 實例化視窗
+                MainWindow myWindow = new MainWindow(uiapp);
+
+                // ★★★ 關鍵修正：改回 ShowDialog() ★★★
+                //這會讓視窗保持在 API 的執行環境內，解決 "Starting a transaction..." 的錯誤
+                myWindow.ShowDialog();
+
+                return Result.Succeeded;
             }
-            // 2. 實例化我們的視窗 (帶著 uidoc 這張門票)
-            MainWindow myWindow = new MainWindow(uidoc);
+            catch (Exception ex)
+            {
+                message = ex.Message;
+                return Result.Failed;
+            }
+        }
+    }
 
-            // 3. 顯示視窗
-            myWindow.ShowDialog();
-
-            return Result.Succeeded;
+    public class CommandAvailability : IExternalCommandAvailability
+    {
+        public bool IsCommandAvailable(UIApplication applicationData, CategorySet selectedCategories)
+        {
+            return true;
         }
     }
 }
