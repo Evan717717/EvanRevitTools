@@ -60,12 +60,12 @@ namespace BIMDev_COBieAutomator
             // ★ 按鈕 2: 參數建立 (對應 CommandParameter.cs)
             // =======================================================
             PushButtonData btnData2 = new PushButtonData(
-                "BtnCreateParam",       // 按鈕內部名稱
-                "參數\n批次建立",       // 按鈕顯示名稱
-                assemblyPath,           // DLL 路徑
-                "BIMDev_COBieAutomator.CommandParameter" // 對應的 C# 類別全名
+                "BtnCreateParam",       
+                "共用參數\n維護",       // ★ 修改這裡：原本是 "參數\n批次建立"
+                assemblyPath,           
+                "BIMDev_COBieAutomator.CommandParameter" 
             );
-            btnData2.ToolTip = "讀取共用參數檔 (.txt) 並批次綁定至模型";
+            btnData2.ToolTip = "讀取共用參數檔 (.txt) 並批次綁定、新增或移除模型參數";
 
             // 4. 將按鈕加入面板
             panel.AddItem(btnData1);

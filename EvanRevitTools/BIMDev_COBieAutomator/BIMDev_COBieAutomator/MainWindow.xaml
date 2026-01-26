@@ -2,17 +2,17 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="COBie 自動化導入工具 - BIM Development" 
-        Height="500" Width="700"
+        Height="550" Width="700"
         WindowStartupLocation="CenterScreen"
         ResizeMode="NoResize">
 
     <Grid Margin="10">
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="2*"/>
-            <ColumnDefinition Width="1.5*"/>
+            <ColumnDefinition Width="1.8*"/>
         </Grid.ColumnDefinitions>
 
-        <GroupBox Header="1. 選擇 Excel 來源 (B表)" Grid.Column="0" Margin="0,0,5,0">
+        <GroupBox Header="1. 選擇 Excel 來源" Grid.Column="0" Margin="0,0,5,0">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -32,7 +32,7 @@
         </GroupBox>
 
         <Grid Grid.Column="1" Margin="5,0,0,0">
-            <TabControl>
+            <TabControl Name="MainTabControl">
 
                 <TabItem Header="👤 當前模型">
                     <StackPanel Margin="5">
@@ -67,25 +67,31 @@
                         <GroupBox Header="1. 前置作業：建立參數 (選填)" Grid.Row="0" Margin="0,0,0,5">
                             <StackPanel Margin="5">
                                 <CheckBox Name="CbRunParamCreation" Content="執行前先建立 COBie 參數" Margin="0,0,0,5" Checked="CbRunParamCreation_CheckedChanged" Unchecked="CbRunParamCreation_CheckedChanged"/>
+
                                 <Grid Name="GridParamSettings" IsEnabled="False">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*"/>
                                         <ColumnDefinition Width="Auto"/>
                                     </Grid.ColumnDefinitions>
-                                    <TextBox Name="TxtSharedParamPath_Batch" IsReadOnly="True" Height="23" Text="請選擇共用參數檔 (.txt)..." Foreground="Gray"/>
+                                    <TextBox Name="TxtSharedParamPath_Batch" IsReadOnly="True" Height="23" Text="請選擇共用參數檔 (.txt)..." Foreground="Gray" VerticalContentAlignment="Center"/>
                                     <Button Name="BtnSelectSPFile" Content="瀏覽..." Grid.Column="1" Width="50" Margin="5,0,0,0" Click="BtnSelectSPFile_Click"/>
                                 </Grid>
 
-                                <StackPanel Orientation="Horizontal" Margin="0,5,0,0" Name="PanelParamOpts" IsEnabled="False">
-                                    <TextBlock Text="綁定對象:" VerticalAlignment="Center"/>
-                                    <ComboBox Name="CmbCategoryMode" Width="120" Margin="5,0,10,0" Height="22" SelectedIndex="0">
-                                        <ComboBoxItem Content="MEP 常用類別"/>
-                                        <ComboBoxItem Content="所有模型類別 (All)"/>
-                                    </ComboBox>
+                                <StackPanel Name="PanelParamOpts" IsEnabled="False" Margin="0,5,0,0">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                                        <TextBlock Text="綁定對象：" VerticalAlignment="Center" Width="65"/>
+                                        <ComboBox Name="CmbCategoryMode" Width="150" Height="22" SelectedIndex="0">
+                                            <ComboBoxItem Content="MEP 常用類別"/>
+                                            <ComboBoxItem Content="所有模型類別 (All)"/>
+                                        </ComboBox>
+                                    </StackPanel>
 
-                                    <TextBlock Text="群組:" VerticalAlignment="Center"/>
-                                    <ComboBox Name="CmbGroups_Batch" Width="80" Margin="5,0,10,0" Height="22"/>
-                                    <CheckBox Name="CbVary_Batch" Content="Vary by Group" IsChecked="True" VerticalAlignment="Center"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="參數群組：" VerticalAlignment="Center" Width="65"/>
+                                        <ComboBox Name="CmbGroups_Batch" Width="100" Margin="0,0,10,0" Height="22"/>
+                                        <CheckBox Name="CbVary_Batch" Content="Vary by Group" IsChecked="True" VerticalAlignment="Center"
+                                                  ToolTip="數值可隨群組實體變化"/>
+                                    </StackPanel>
                                 </StackPanel>
                             </StackPanel>
                         </GroupBox>
