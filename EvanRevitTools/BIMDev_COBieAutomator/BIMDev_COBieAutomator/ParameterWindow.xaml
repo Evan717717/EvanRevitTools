@@ -1,0 +1,114 @@
+﻿<Window x:Class="BIMDev_COBieAutomator.ParameterWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="COBie 參數維護管理員" Height="650" Width="550" 
+        ResizeMode="CanResize" WindowStartupLocation="CenterScreen">
+
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="⚙️ 共用參數維護中心" FontSize="18" FontWeight="Bold" Margin="0,0,0,10"/>
+
+        <GroupBox Header="1. 共用參數來源設定 (.txt)" Grid.Row="1" Margin="0,0,0,10">
+            <StackPanel Margin="5">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox Name="TxtSharedParamPath" IsReadOnly="True" Height="25" VerticalContentAlignment="Center"/>
+                    <Button Name="BtnSelectFile" Content="瀏覽..." Grid.Column="1" Width="60" Margin="5,0,0,0" Click="BtnSelectFile_Click"/>
+                </Grid>
+
+                <Grid Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="選擇目標群組：" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                    <ComboBox Name="CmbGroups" Grid.Column="1" Height="25" SelectionChanged="CmbGroups_SelectionChanged"/>
+                </Grid>
+                <TextBlock Text="※ 請選擇如 'COBie' 等群組，切換群組將自動重新整理下方清單" Foreground="Gray" FontSize="10" Margin="0,5,0,0"/>
+            </StackPanel>
+        </GroupBox>
+
+        <TabControl Name="MainTabControl" Grid.Row="2" Margin="0,0,0,10" SelectionChanged="MainTabControl_SelectionChanged">
+
+            <TabItem Header="➕ 新增參數" Name="TabAdd">
+                <Grid Margin="5">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <GroupBox Header="選擇要新增的參數 (灰色代表已存在)" Grid.Row="0">
+                        <ListBox Name="ListParamsToAdd" Margin="5" ScrollViewer.VerticalScrollBarVisibility="Auto"/>
+                    </GroupBox>
+
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,5">
+                        <Button Content="全選" Width="50" Click="BtnSelectAllParams_Click" Margin="0,0,5,0"/>
+                        <Button Content="全不選" Width="50" Click="BtnUnselectAllParams_Click"/>
+                    </StackPanel>
+
+                    <GroupBox Header="綁定目標 Category" Grid.Row="2" Height="150" Margin="0,5">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <ListBox Name="ListCategories" Grid.Row="0" Margin="5"/>
+                            <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="5">
+                                <Button Content="全選" Width="50" Click="BtnSelectAllCats_Click" Margin="0,0,5,0"/>
+                                <Button Content="全不選" Width="50" Click="BtnUnselectAllCats_Click"/>
+                            </StackPanel>
+                        </Grid>
+                    </GroupBox>
+
+                    <CheckBox Name="CbVaryByGroup" Grid.Row="3" Content="數值可隨群組實體變化 (Vary by Group)" IsChecked="True" Margin="0,5,0,5"/>
+
+                    <Button Name="BtnCreate" Content="🚀 執行新增" Grid.Row="4" Height="35" Background="#E0FFE0" FontWeight="Bold" Click="BtnCreate_Click"/>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="🗑️ 移除參數" Name="TabRemove">
+                <Grid Margin="5">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="⚠️ 注意：這將從專案中永久移除選定的參數，無需 TXT 檔即可操作。" Foreground="Red" Margin="0,0,0,5"/>
+
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,5">
+                        <TextBlock Text="參數名稱關鍵字：" VerticalAlignment="Center"/>
+                        <TextBox Name="TxtRemoveFilter" Text="COBie" Width="100" Margin="5,0,0,0" VerticalContentAlignment="Center"/>
+                        <Button Content="🔍 掃描專案" Width="80" Margin="5,0,0,0" Click="BtnScanProject_Click"/>
+                    </StackPanel>
+
+                    <GroupBox Header="搜尋結果 (存在於本專案的參數)" Grid.Row="2">
+                        <ListBox Name="ListParamsToRemove" Margin="5">
+                        </ListBox>
+                    </GroupBox>
+
+                    <StackPanel Grid.Row="3">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,5">
+                            <Button Content="全選" Width="50" Click="BtnSelectAllRemove_Click" Margin="0,0,5,0"/>
+                            <Button Content="全不選" Width="50" Click="BtnUnselectAllRemove_Click"/>
+                        </StackPanel>
+                        <Button Name="BtnRemove" Content="💣 執行移除" Height="35" Background="#FFE0E0" FontWeight="Bold" Click="BtnRemove_Click"/>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+
+        </TabControl>
+    </Grid>
+</Window>
