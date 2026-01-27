@@ -19,6 +19,11 @@ namespace BIMDev_COBieAutomator
         private UIDocument _uidoc;
         private Document _doc;
 
+        // 用來記憶上次路徑的變數
+        private string _lastExcelPath = "";
+        private string _lastRvtPath = "";
+        private string _lastSPPath = "";
+
         public MainWindow(UIApplication uiapp)
         {
             InitializeComponent();
@@ -26,47 +31,49 @@ namespace BIMDev_COBieAutomator
             _uiapp = uiapp;
             _uidoc = uiapp.ActiveUIDocument;
 
-            // 判斷現在有沒有開圖
             if (_uidoc != null)
             {
-                // --- 狀況 A: 有開圖 (正常模式) ---
                 _doc = _uidoc.Document;
                 TxtModelName.Text = _doc.Title;
                 TxtModelName.Foreground = Brushes.Blue;
             }
             else
             {
-                // --- 狀況 B: 沒開圖 (Zero Document 模式) ---
                 _doc = null;
                 TxtModelName.Text = "(無開啟專案 - 僅限使用批次模式)";
                 TxtModelName.Foreground = Brushes.Gray;
-
-                // 1. 鎖死「單機執行」按鈕
                 if (BtnRun != null) BtnRun.IsEnabled = false;
-
-                // 2. 自動切換到 Tab 2 (批次處理) - 如果你的 XAML 沒命名 TabControl，這行可以省略
-                // if (MainTabControl != null) MainTabControl.SelectedIndex = 1; 
             }
         }
 
         // ============================================================
-        // UI 事件區 (左側 Excel) - 優化版資料夾選擇
+        // UI 事件區 (左側 Excel) - 強制隔離路徑
         // ============================================================
         private void BtnSelectFolder_Click(object sender, RoutedEventArgs e)
         {
-            // 使用 OpenFileDialog 加上 CheckFileExists = false 來模擬現代化資料夾選擇
             WinForms.OpenFileDialog dialog = new WinForms.OpenFileDialog();
             dialog.ValidateNames = false;
             dialog.CheckFileExists = false;
             dialog.CheckPathExists = true;
-            dialog.FileName = "選擇資料夾"; // 設定一個假檔名，引導使用者按確定
+            dialog.FileName = "選擇資料夾";
             dialog.Title = "請選擇包含 B 表 (Excel) 的資料夾";
-            dialog.Filter = "資料夾|*.folder"; // 設一個假過濾器
+            dialog.Filter = "資料夾|*.folder";
+            dialog.RestoreDirectory = true;
+
+            // ★ 邏輯修正：如果沒有記憶，就強制回桌面，避免被上一個按鈕影響
+            if (!string.IsNullOrEmpty(_lastExcelPath) && Directory.Exists(_lastExcelPath))
+            {
+                dialog.InitialDirectory = _lastExcelPath;
+            }
+            else
+            {
+                dialog.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            }
 
             if (dialog.ShowDialog() == WinForms.DialogResult.OK)
             {
-                // 取得目錄路徑 (去掉假檔名)
                 string selectedPath = Path.GetDirectoryName(dialog.FileName);
+                _lastExcelPath = selectedPath; // 寫入記憶
 
                 if (!string.IsNullOrEmpty(selectedPath))
                 {
@@ -78,17 +85,17 @@ namespace BIMDev_COBieAutomator
                         CheckBox cb = new CheckBox { Content = Path.GetFileName(file), Tag = file, IsChecked = true, Margin = new Thickness(2) };
                         ListExcelFiles.Items.Add(cb);
                     }
-                    // 提示一下使用者
                     if (ListExcelFiles.Items.Count == 0) MessageBox.Show("該資料夾內沒有 Excel 檔案");
                 }
             }
         }
+
         private void BtnSelectAll_Click(object sender, RoutedEventArgs e) { foreach (CheckBox cb in ListExcelFiles.Items) cb.IsChecked = true; }
         private void BtnUnselectAll_Click(object sender, RoutedEventArgs e) { foreach (CheckBox cb in ListExcelFiles.Items) cb.IsChecked = false; }
 
 
         // ============================================================
-        // UI 事件區 (批次參數設定)
+        // UI 事件區 (批次參數設定) - 強制隔離路徑
         // ============================================================
         private void CbRunParamCreation_CheckedChanged(object sender, RoutedEventArgs e)
         {
@@ -100,17 +107,29 @@ namespace BIMDev_COBieAutomator
         private void BtnSelectSPFile_Click(object sender, RoutedEventArgs e)
         {
             WinForms.OpenFileDialog dlg = new WinForms.OpenFileDialog { Filter = "Shared Parameter (*.txt)|*.txt" };
+            dlg.RestoreDirectory = true;
+
+            // ★ 邏輯修正：如果沒有記憶，就強制回桌面
+            if (!string.IsNullOrEmpty(_lastSPPath) && Directory.Exists(_lastSPPath))
+            {
+                dlg.InitialDirectory = _lastSPPath;
+            }
+            else
+            {
+                dlg.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            }
+
             if (dlg.ShowDialog() == WinForms.DialogResult.OK)
             {
+                _lastSPPath = Path.GetDirectoryName(dlg.FileName); // 寫入記憶
+
                 TxtSharedParamPath_Batch.Text = dlg.FileName;
                 TxtSharedParamPath_Batch.Foreground = Brushes.Black;
 
                 try
                 {
-                    // 嘗試讀取群組
                     if (_doc != null)
                     {
-                        // 如果有開圖，直接用 API 讀最準
                         _doc.Application.SharedParametersFilename = dlg.FileName;
                         DefinitionFile spFile = _doc.Application.OpenSharedParameterFile();
                         CmbGroups_Batch.Items.Clear();
@@ -118,25 +137,18 @@ namespace BIMDev_COBieAutomator
                     }
                     else
                     {
-                        // ★★★ 修正 Zero Doc 模式下的文字解析 ★★★
                         string[] lines = File.ReadAllLines(dlg.FileName);
                         CmbGroups_Batch.Items.Clear();
                         foreach (string line in lines)
                         {
-                            // 格式通常是: GROUP [TAB] ID [TAB] NAME
                             if (line.StartsWith("GROUP") && !line.StartsWith("GROUP\tID"))
                             {
                                 string[] parts = line.Split('\t');
-                                // parts[0]=GROUP, parts[1]=ID, parts[2]=Name
-                                if (parts.Length > 2)
-                                {
-                                    CmbGroups_Batch.Items.Add(parts[2]); // 抓名字
-                                }
+                                if (parts.Length > 2) CmbGroups_Batch.Items.Add(parts[2]);
                             }
                         }
                     }
 
-                    // 自動選取 COBie
                     if (CmbGroups_Batch.Items.Contains("COBie")) CmbGroups_Batch.SelectedItem = "COBie";
                     else if (CmbGroups_Batch.Items.Count > 0) CmbGroups_Batch.SelectedIndex = 0;
                 }
@@ -153,10 +165,22 @@ namespace BIMDev_COBieAutomator
             dialog.FileName = "選擇資料夾";
             dialog.Title = "請選擇包含 Revit 模型 (.rvt) 的資料夾";
             dialog.Filter = "資料夾|*.folder";
+            dialog.RestoreDirectory = true;
+
+            // ★ 邏輯修正：如果沒有記憶，就強制回桌面
+            if (!string.IsNullOrEmpty(_lastRvtPath) && Directory.Exists(_lastRvtPath))
+            {
+                dialog.InitialDirectory = _lastRvtPath;
+            }
+            else
+            {
+                dialog.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            }
 
             if (dialog.ShowDialog() == WinForms.DialogResult.OK)
             {
                 string selectedPath = Path.GetDirectoryName(dialog.FileName);
+                _lastRvtPath = selectedPath; // 寫入記憶
 
                 if (!string.IsNullOrEmpty(selectedPath))
                 {
@@ -175,10 +199,9 @@ namespace BIMDev_COBieAutomator
 
 
         // ============================================================
-        // 核心執行區
+        // 核心執行區 (以下保持不變)
         // ============================================================
 
-        // 1. 單機執行
         private void BtnRun_Click(object sender, RoutedEventArgs e)
         {
             if (_doc == null) return;
@@ -194,20 +217,16 @@ namespace BIMDev_COBieAutomator
             }
         }
 
-        // 2. 批次執行
         private void BtnBatchRun_Click(object sender, RoutedEventArgs e)
         {
             List<string> xlsFiles = GetCheckedFiles(ListExcelFiles);
             List<string> rvtFiles = GetCheckedFiles(ListRvtFiles);
             if (xlsFiles.Count == 0 || rvtFiles.Count == 0) { MessageBox.Show("請確認 Excel 與 Revit 檔案皆已選擇！"); return; }
 
-            // 參數設定檢查
             bool doCreateParam = CbRunParamCreation.IsChecked == true;
             string spPath = TxtSharedParamPath_Batch.Text;
             string spGroup = CmbGroups_Batch.SelectedItem?.ToString();
             bool spVary = CbVary_Batch.IsChecked == true;
-            
-            // ★ 新增：讀取綁定模式 (0=MEP, 1=All)
             bool bindToAll = (CmbCategoryMode.SelectedIndex == 1);
 
             if (doCreateParam && (string.IsNullOrEmpty(spPath) || File.Exists(spPath) == false))
@@ -233,15 +252,12 @@ namespace BIMDev_COBieAutomator
                     {
                         t.Start();
 
-                        // --- 步驟 A: 建立參數 ---
                         if (doCreateParam)
                         {
-                            // ★ 傳入 bindToAll 參數
                             string paramLog = RunBatchParameterCreation(bgDoc, app, spPath, spGroup, spVary, bindToAll);
                             batchLog.AppendLine($"   ⚙️ 參數檢查/建立: {paramLog}");
                         }
 
-                        // --- 步驟 B: 導入資料 ---
                         string dataLog = RunCOBieInjection(bgDoc, xlsFiles, RbOnlyFillBlank.IsChecked == true, true);
                         if (dataLog.Contains("嚴重錯誤")) batchLog.AppendLine("   ❌ 資料導入失敗");
                         else batchLog.AppendLine("   ✅ 資料導入完成");
@@ -263,9 +279,6 @@ namespace BIMDev_COBieAutomator
             MessageBox.Show(batchLog.ToString());
         }
 
-        // ============================================================
-        // 引擎 1: 資料導入
-        // ============================================================
         private string RunCOBieInjection(Document targetDoc, List<string> excelFiles, bool onlyFillBlank, bool ignoreTempFiles)
         {
             System.Text.StringBuilder log = new System.Text.StringBuilder();
@@ -337,7 +350,6 @@ namespace BIMDev_COBieAutomator
             return log.ToString();
         }
 
-        // 輔助方法：讀取儲存格
         private string GetCellValue(IRow row, int cellIndex)
         {
             ICell cell = row.GetCell(cellIndex);
@@ -351,10 +363,6 @@ namespace BIMDev_COBieAutomator
             return cell.ToString().Trim();
         }
 
-        // ============================================================
-        // ============================================================
-        // 引擎 2: 參數建立 (升級版：支援全類別)
-        // ============================================================
         private string RunBatchParameterCreation(Document doc, Autodesk.Revit.ApplicationServices.Application app, string txtPath, string groupName, bool isVary, bool bindToAll)
         {
             try
@@ -366,16 +374,12 @@ namespace BIMDev_COBieAutomator
                 DefinitionGroup group = spFile.Groups.get_Item(groupName);
                 if (group == null) return $"找不到群組 {groupName}";
 
-                // 準備 CategorySet
                 CategorySet catSet = app.Create.NewCategorySet();
 
                 if (bindToAll)
                 {
-                    // ★ 模式 A: 綁定所有模型類別 (比照 Phase 3)
                     foreach (Category cat in doc.Settings.Categories)
                     {
-                        // 只要允許綁定參數，且是模型類別，就加入
-                        // 這裡加一個簡單的過濾，避免系統雜項
                         if (cat.AllowsBoundParameters &&
                             (cat.CategoryType == CategoryType.Model) &&
                             cat.CanAddSubcategory)
@@ -386,7 +390,6 @@ namespace BIMDev_COBieAutomator
                 }
                 else
                 {
-                    // ★ 模式 B: 僅綁定 MEP 常用類別 (原本的邏輯)
                     BuiltInCategory[] cats = new BuiltInCategory[] {
                         BuiltInCategory.OST_PipeAccessory, BuiltInCategory.OST_MechanicalEquipment,
                         BuiltInCategory.OST_ElectricalFixtures, BuiltInCategory.OST_PlumbingFixtures,
@@ -396,7 +399,7 @@ namespace BIMDev_COBieAutomator
                         BuiltInCategory.OST_CommunicationDevices, BuiltInCategory.OST_FireAlarmDevices,
                         BuiltInCategory.OST_DataDevices, BuiltInCategory.OST_SecurityDevices,
                         BuiltInCategory.OST_Doors, BuiltInCategory.OST_Windows,
-                        BuiltInCategory.OST_Walls, BuiltInCategory.OST_Floors // 多加幾個常用的
+                        BuiltInCategory.OST_Walls, BuiltInCategory.OST_Floors
                     };
                     foreach (var bic in cats)
                     {
