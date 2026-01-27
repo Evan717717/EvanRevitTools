@@ -50,20 +50,36 @@ namespace BIMDev_COBieAutomator
         }
 
         // ============================================================
-        // UI 事件區 (左側 Excel)
+        // UI 事件區 (左側 Excel) - 優化版資料夾選擇
         // ============================================================
         private void BtnSelectFolder_Click(object sender, RoutedEventArgs e)
         {
-            WinForms.FolderBrowserDialog dialog = new WinForms.FolderBrowserDialog();
+            // 使用 OpenFileDialog 加上 CheckFileExists = false 來模擬現代化資料夾選擇
+            WinForms.OpenFileDialog dialog = new WinForms.OpenFileDialog();
+            dialog.ValidateNames = false;
+            dialog.CheckFileExists = false;
+            dialog.CheckPathExists = true;
+            dialog.FileName = "選擇資料夾"; // 設定一個假檔名，引導使用者按確定
+            dialog.Title = "請選擇包含 B 表 (Excel) 的資料夾";
+            dialog.Filter = "資料夾|*.folder"; // 設一個假過濾器
+
             if (dialog.ShowDialog() == WinForms.DialogResult.OK)
             {
-                string[] excelFiles = Directory.GetFiles(dialog.SelectedPath, "*.xlsx");
-                ListExcelFiles.Items.Clear();
-                foreach (string file in excelFiles)
+                // 取得目錄路徑 (去掉假檔名)
+                string selectedPath = Path.GetDirectoryName(dialog.FileName);
+
+                if (!string.IsNullOrEmpty(selectedPath))
                 {
-                    if (Path.GetFileName(file).StartsWith("~$")) continue;
-                    CheckBox cb = new CheckBox { Content = Path.GetFileName(file), Tag = file, IsChecked = true, Margin = new Thickness(2) };
-                    ListExcelFiles.Items.Add(cb);
+                    string[] excelFiles = Directory.GetFiles(selectedPath, "*.xlsx");
+                    ListExcelFiles.Items.Clear();
+                    foreach (string file in excelFiles)
+                    {
+                        if (Path.GetFileName(file).StartsWith("~$")) continue;
+                        CheckBox cb = new CheckBox { Content = Path.GetFileName(file), Tag = file, IsChecked = true, Margin = new Thickness(2) };
+                        ListExcelFiles.Items.Add(cb);
+                    }
+                    // 提示一下使用者
+                    if (ListExcelFiles.Items.Count == 0) MessageBox.Show("該資料夾內沒有 Excel 檔案");
                 }
             }
         }
@@ -130,17 +146,29 @@ namespace BIMDev_COBieAutomator
 
         private void BtnSelectRvtFolder_Click(object sender, RoutedEventArgs e)
         {
-            WinForms.FolderBrowserDialog dlg = new WinForms.FolderBrowserDialog();
-            if (dlg.ShowDialog() == WinForms.DialogResult.OK)
+            WinForms.OpenFileDialog dialog = new WinForms.OpenFileDialog();
+            dialog.ValidateNames = false;
+            dialog.CheckFileExists = false;
+            dialog.CheckPathExists = true;
+            dialog.FileName = "選擇資料夾";
+            dialog.Title = "請選擇包含 Revit 模型 (.rvt) 的資料夾";
+            dialog.Filter = "資料夾|*.folder";
+
+            if (dialog.ShowDialog() == WinForms.DialogResult.OK)
             {
-                string[] files = Directory.GetFiles(dlg.SelectedPath, "*.rvt");
-                ListRvtFiles.Items.Clear();
-                foreach (string f in files)
+                string selectedPath = Path.GetDirectoryName(dialog.FileName);
+
+                if (!string.IsNullOrEmpty(selectedPath))
                 {
-                    // 過濾備份檔
-                    if (f.Contains(".00") && f.EndsWith(".rvt")) continue;
-                    CheckBox cb = new CheckBox { Content = Path.GetFileName(f), Tag = f, IsChecked = true };
-                    ListRvtFiles.Items.Add(cb);
+                    string[] files = Directory.GetFiles(selectedPath, "*.rvt");
+                    ListRvtFiles.Items.Clear();
+                    foreach (string f in files)
+                    {
+                        if (f.Contains(".00") && f.EndsWith(".rvt")) continue;
+                        CheckBox cb = new CheckBox { Content = Path.GetFileName(f), Tag = f, IsChecked = true };
+                        ListRvtFiles.Items.Add(cb);
+                    }
+                    if (ListRvtFiles.Items.Count == 0) MessageBox.Show("該資料夾內沒有 Revit 模型");
                 }
             }
         }
