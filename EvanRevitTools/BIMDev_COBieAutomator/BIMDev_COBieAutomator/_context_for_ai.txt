@@ -1,0 +1,1506 @@
+=== 🛑 PROJECT CONTEXT & RULES (READ THIS FIRST) ===
+
+# _AI_RULES.md
+
+## 1. 專案目標 (Objective)
+
+**BIMDev_COBieAutomator** 是一個專為 Revit 開發的資料與參數自動化管理工具，主要解決 BIM 模型中 COBie 資料流的雙向維護問題。
+根據程式碼分析，其核心功能定義如下：
+
+* 
+**Excel 資料注入 (Data Injection)**：讀取特定格式的 Excel (B表)，將 COBie 資料自動寫入對應的 Revit 元件參數中 。
+
+
+* 
+**參數自動化綁定 (Parameter Binding)**：讀取共用參數檔 (.txt)，批次將參數綁定到模型類別 (Category) 或從專案中移除參數 。
+
+
+* 
+**批次處理能力 (Batch Processing)**：具備背景開啟 Revit 檔案、執行注入、存檔並關閉的自動化能力，無需人工逐一開啟模型 。
+
+
+
+## 2. 技術堆疊 (Tech Stack)
+
+* 
+**語言與框架**：C# / .NET Framework 4.8 (推斷自 `packages.config` 的 `targetFramework="net48"`) 。
+
+
+* **Revit API 版本**：相容 Revit 2021+ (基於 .NET 4.8 需求)。
+* **第三方套件**：
+* 
+**NPOI (2.5.6)**：用於無須安裝 Office 即可讀取 Excel (.xlsx) 檔案 。
+
+
+* **System.Memory / System.Buffers**：NPOI 的相依套件，用於優化記憶體操作。
+
+
+* 
+**UI 框架**：WPF (Windows Presentation Foundation) 。
+
+
+
+## 3. 核心架構 (Architecture)
+
+### Entry Point (進入點)
+
+* **App.cs (`IExternalApplication`)**：
+* 負責應用程式生命週期管理。
+* 在 `OnStartup` 中建立名為 "BIM Development" 的 Ribbon Tab 和 "COBie Tools" 面板 。
+
+
+* 註冊了兩個主要按鈕：
+1. 
+**資料導入**：對應 `Command` 類別 。
+
+
+2. 
+**共用參數維護**：對應 `CommandParameter` 類別 。
+
+
+
+
+
+
+* **Command.cs / CommandParameter.cs (`IExternalCommand`)**：
+* 作為 Revit 指令的觸發器。
+* 負責取得 `UIApplication` 或 `UIDocument`，並實例化對應的 WPF 視窗 。
+
+
+
+
+
+### UI 互動與線程模型
+
+* **模式 (Modality)**：
+* 採用 **Modal (模態)** 模式。視窗是透過 `ShowDialog()` 呼叫的 。
+
+
+* **架構意義**：這意味著當視窗開啟時，Revit 的主視窗會被鎖定 (Freeze)，但 API 的執行緒 (Main Thread) 仍然保持活躍並等待視窗關閉。這允許我們直接在 UI 的事件 (如按鈕點擊) 中呼叫 Revit API，而不需要使用 `IExternalEventHandler`。
+
+
+
+### Transaction (事務處理)
+
+* 
+**屬性設定**：Command 類別標記為 `[Transaction(TransactionMode.Manual)]`，表示手動控制事務 。
+
+
+* **事務範圍**：
+* 事務並非在 Command 開始時建立，而是在 **UI 事件內部** 建立。
+* 例如 `MainWindow.xaml.cs` 中的 `BtnRun_Click` 建立了一個名為 "COBie 單機導入" 的事務 。
+
+
+* 在批次模式下，程式會為每一個背景開啟的文件 (`bgDoc`) 建立獨立的事務 。
+
+
+
+
+
+## 4. 開發規範 (Guidelines)
+
+基於目前的程式碼快照，未來開發請嚴格遵守以下規範：
+
+1. **UI 與邏輯分離 (Separation of Concerns)**：
+* 
+*現狀*：目前的業務邏輯 (如 `RunCOBieInjection`, `RunBatchParameterCreation`) 直接寫在 `.xaml.cs` (Code-behind) 中 。
+
+
+* *規範*：未來應將 Revit API 操作邏輯提取至獨立的 `Service` 或 `Utils` 類別中 (例如 `COBieService.cs`)。UI 僅負責收集使用者輸入與顯示進度，不應包含複雜的 Excel 解析或幾何運算代碼。
+
+
+2. **Excel 資源釋放 (Resource Management)**：
+* 
+*現狀*：目前使用了 `using (FileStream ...)` ，這很好。
+
+
+* *規範*：由於 NPOI 會佔用檔案鎖定，確保在讀取完畢後立即釋放 `IWorkbook` 物件。在批次處理迴圈中，務必確保 Excel 檔案流不會被重複開啟導致 "檔案被另一程序使用" 的錯誤。建議將 Excel 讀取邏輯封裝，讀取完資料即斷開連接，只將資料 (POCO objects) 傳遞給 Revit 處理邏輯。
+
+
+3. **錯誤處理與日誌 (Error Handling & Logging)**：
+* 
+*現狀*：多處使用了空的 `try-catch` 或僅用 `MessageBox` 顯示錯誤 。
+
+
+* *規範*：
+* **禁止**使用空的 `catch` 區塊吞噬錯誤 (Swallowing exceptions)，這會增加除錯難度。
+* 在批次處理模式下 (`BtnBatchRun_Click`)，除了 `StringBuilder` 的日誌外，建議引入輕量級的 Log 檔案寫入機制 (如寫入 `.txt` 到桌面)，防止程式崩潰時無法查看 UI 上的日誌 。
+
+
+* 對於 "Vary by Group" 這種進階 API 操作 (`InternalDefinition`)，必須保留詳細的錯誤追蹤，因為這涉及 Revit 內部屬性，容易隨版本變更而失效 。
+=== END OF RULES ===
+
+
+--- FILE: app.config ---
+﻿<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <runtime>
+    <assemblyBinding xmlns="urn:schemas-microsoft-com:asm.v1">
+      <dependentAssembly>
+        <assemblyIdentity name="System.Runtime.CompilerServices.Unsafe" publicKeyToken="b03f5f7f11d50a3a" culture="neutral" />
+        <bindingRedirect oldVersion="0.0.0.0-6.0.0.0" newVersion="6.0.0.0" />
+      </dependentAssembly>
+      <dependentAssembly>
+        <assemblyIdentity name="System.Numerics.Vectors" publicKeyToken="b03f5f7f11d50a3a" culture="neutral" />
+        <bindingRedirect oldVersion="0.0.0.0-4.1.4.0" newVersion="4.1.4.0" />
+      </dependentAssembly>
+      <dependentAssembly>
+        <assemblyIdentity name="System.Buffers" publicKeyToken="cc7b13ffcd2ddd51" culture="neutral" />
+        <bindingRedirect oldVersion="0.0.0.0-4.0.3.0" newVersion="4.0.3.0" />
+      </dependentAssembly>
+      <dependentAssembly>
+        <assemblyIdentity name="System.Memory" publicKeyToken="cc7b13ffcd2ddd51" culture="neutral" />
+        <bindingRedirect oldVersion="0.0.0.0-4.0.1.2" newVersion="4.0.1.2" />
+      </dependentAssembly>
+      <dependentAssembly>
+        <assemblyIdentity name="ICSharpCode.SharpZipLib" publicKeyToken="1b03e6acf1164f73" culture="neutral" />
+        <bindingRedirect oldVersion="0.0.0.0-1.4.2.13" newVersion="1.4.2.13" />
+      </dependentAssembly>
+    </assemblyBinding>
+  </runtime>
+</configuration>
+--- END OF FILE ---
+
+--- FILE: App.cs ---
+﻿using System;
+using System.Collections.Generic;
+using System.IO; // 為了讀取串流
+using System.Reflection; // 為了讀取內嵌資源 & DLL 路徑
+using System.Windows.Media.Imaging; // 為了轉換成 Revit 看得懂的圖片格式
+using Autodesk.Revit.Attributes;
+using Autodesk.Revit.DB;
+using Autodesk.Revit.UI;
+
+namespace BIMDev_COBieAutomator
+{
+    [Transaction(TransactionMode.Manual)]
+    public class App : IExternalApplication
+    {
+        public Result OnStartup(UIControlledApplication application)
+        {
+            // 1. 建立 Ribbon Tab (分頁)
+            string tabName = "BIM Development";
+            try
+            {
+                application.CreateRibbonTab(tabName);
+            }
+            catch
+            {
+                // 如果分頁已經存在 (例如被其他外掛建立了)，就忽略錯誤繼續往下
+            }
+
+            // 2. 建立 Ribbon Panel (面板)
+            RibbonPanel panel = null;
+            // 嘗試在該分頁下建立面板，如果重名可能會失敗，所以做個檢查
+            List<RibbonPanel> panels = application.GetRibbonPanels(tabName);
+            foreach (RibbonPanel p in panels)
+            {
+                if (p.Name == "COBie Tools")
+                {
+                    panel = p;
+                    break;
+                }
+            }
+            // 如果沒找到就新建一個
+            if (panel == null)
+            {
+                panel = application.CreateRibbonPanel(tabName, "COBie Tools");
+            }
+
+            // 3. 取得目前這支 DLL 的路徑
+            string assemblyPath = Assembly.GetExecutingAssembly().Location;
+
+            // =======================================================
+            // ★ 按鈕 1: 資料導入 (對應 Command.cs)
+            // =======================================================
+            PushButtonData btnData1 = new PushButtonData(
+                "BtnImportCOBie",       // 按鈕內部名稱 (唯一)
+                "COBie\n資料導入",      // 按鈕顯示名稱 (\n 代表換行)
+                assemblyPath,           // DLL 路徑
+                "BIMDev_COBieAutomator.Command" // 對應的 C# 類別全名 (Namespace.Class)
+            );
+            btnData1.AvailabilityClassName = "BIMDev_COBieAutomator.CommandAvailability";
+            btnData1.ToolTip = "讀取已進行Mapping之Excel表並寫入Revit元件參數";
+
+            // ★ 設定圖示 (記得圖片 Build Action 要改為 Embedded Resource)
+            btnData1.LargeImage = GetEmbeddedImage("Import_32.png");
+
+
+            // =======================================================
+            // ★ 按鈕 2: 參數建立 (對應 CommandParameter.cs)
+            // =======================================================
+            PushButtonData btnData2 = new PushButtonData(
+                "BtnCreateParam",
+                "共用參數維護",
+                assemblyPath,
+                "BIMDev_COBieAutomator.CommandParameter"
+            );
+            btnData2.ToolTip = "讀取共用參數檔 (.txt) 並批次綁定、新增或移除模型參數";
+
+            // ★ 設定圖示
+            btnData2.LargeImage = GetEmbeddedImage("Param_32.png");
+
+            // 4. 將按鈕加入面板
+            panel.AddItem(btnData1);
+            // panel.AddSeparator(); // 視需求決定要不要分隔線，現在有圖示通常不用分隔線也很好看
+            panel.AddItem(btnData2);
+
+            return Result.Succeeded;
+        }
+
+        public Result OnShutdown(UIControlledApplication application)
+        {
+            return Result.Succeeded;
+        }
+
+        // =======================================================
+        // ★ 輔助方法：從 DLL 的嵌入資源中讀取圖片
+        // =======================================================
+        public BitmapImage GetEmbeddedImage(string name)
+        {
+            try
+            {
+                // 1. 取得目前的 Assembly (也就是這個 DLL 自己)
+                Assembly assembly = Assembly.GetExecutingAssembly();
+
+                // 2. 組合資源名稱
+                // 格式通常是：[專案Namespace].[資料夾名稱].[檔名.副檔名]
+                // 請確認你的 Namespace 是 BIMDev_COBieAutomator，且資料夾叫 Resources
+                string resourceName = $"BIMDev_COBieAutomator.Resources.{name}";
+
+                using (Stream stream = assembly.GetManifestResourceStream(resourceName))
+                {
+                    if (stream == null) return null;
+
+                    BitmapImage image = new BitmapImage();
+                    image.BeginInit();
+                    image.StreamSource = stream;
+                    image.CacheOption = BitmapCacheOption.OnLoad;
+                    image.EndInit();
+                    return image;
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+    }
+}
+--- END OF FILE ---
+
+--- FILE: Command.cs ---
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using Autodesk.Revit.DB;
+using Autodesk.Revit.UI;
+using Autodesk.Revit.Attributes;
+
+namespace BIMDev_COBieAutomator
+{
+    [Transaction(TransactionMode.Manual)]
+    public class Command : IExternalCommand
+    {
+        public Result Execute(
+            ExternalCommandData commandData,
+            ref string message,
+            ElementSet elements)
+        {
+            // 1. 取得 UI 應用程式
+            UIApplication uiapp = commandData.Application;
+
+            try
+            {
+                // 實例化視窗
+                MainWindow myWindow = new MainWindow(uiapp);
+
+                // ★★★ 關鍵修正：改回 ShowDialog() ★★★
+                //這會讓視窗保持在 API 的執行環境內，解決 "Starting a transaction..." 的錯誤
+                myWindow.ShowDialog();
+
+                return Result.Succeeded;
+            }
+            catch (Exception ex)
+            {
+                message = ex.Message;
+                return Result.Failed;
+            }
+        }
+    }
+
+    public class CommandAvailability : IExternalCommandAvailability
+    {
+        public bool IsCommandAvailable(UIApplication applicationData, CategorySet selectedCategories)
+        {
+            return true;
+        }
+    }
+}
+--- END OF FILE ---
+
+--- FILE: CommandParameter.cs ---
+﻿using System;
+using Autodesk.Revit.DB;
+using Autodesk.Revit.UI;
+using Autodesk.Revit.Attributes;
+
+namespace BIMDev_COBieAutomator
+{
+    [Transaction(TransactionMode.Manual)]
+    public class CommandParameter : IExternalCommand
+    {
+        public Result Execute(
+            ExternalCommandData commandData,
+            ref string message,
+            ElementSet elements)
+        {
+            // 取得 UIDocument
+            UIDocument uidoc = commandData.Application.ActiveUIDocument;
+
+            // 檢查是否開啟了文件
+            if (uidoc == null)
+            {
+                TaskDialog.Show("錯誤", "請先開啟一個 Revit 專案模型！");
+                return Result.Cancelled;
+            }
+
+            // 開啟我們的新視窗 (ParameterWindow)
+            // 注意：我們還沒建立這個視窗，等一下步驟 2 會做
+            ParameterWindow paramWin = new ParameterWindow(uidoc);
+            paramWin.ShowDialog();
+
+            return Result.Succeeded;
+        }
+    }
+}
+--- END OF FILE ---
+
+--- FILE: MainWindow.xaml ---
+﻿<Window x:Class="BIMDev_COBieAutomator.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="COBie 自動化導入工具 - BIM Development" 
+        Height="550" Width="700"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="NoResize">
+
+    <Grid Margin="10">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="2*"/>
+            <ColumnDefinition Width="1.8*"/>
+        </Grid.ColumnDefinitions>
+
+        <GroupBox Header="1. 選擇 Excel 來源" Grid.Column="0" Margin="0,0,5,0">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <Button Name="BtnSelectFolder" Content="📂 選擇資料夾..." Height="25" Margin="5" Click="BtnSelectFolder_Click" />
+
+                <ListBox Name="ListExcelFiles" Grid.Row="1" Margin="5"/>
+
+                <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="5">
+                    <Button Content="全選" Width="50" Margin="0,0,5,0" Click="BtnSelectAll_Click"/>
+                    <Button Content="全不選" Width="50" Click="BtnUnselectAll_Click"/>
+                </StackPanel>
+            </Grid>
+        </GroupBox>
+
+        <Grid Grid.Column="1" Margin="5,0,0,0">
+            <TabControl Name="MainTabControl">
+
+                <TabItem Header="👤 當前模型">
+                    <StackPanel Margin="5">
+                        <GroupBox Header="目標模型資訊" Margin="0,0,0,10">
+                            <StackPanel Margin="5">
+                                <TextBlock Text="目前連接模型：" FontWeight="Bold" Margin="0,0,0,5"/>
+                                <TextBlock Name="TxtModelName" Text="尚未讀取" TextWrapping="Wrap" Foreground="Blue" Margin="0,0,0,10"/>
+                                <TextBlock Text="此模式將直接對目前開啟的 Revit 視窗進行修改。" Foreground="Gray" FontSize="10" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="寫入設定">
+                            <StackPanel Margin="5">
+                                <RadioButton Name="RbOnlyFillBlank" Content="僅寫入空白參數 (保留既有值)" IsChecked="True" Margin="0,5"/>
+                                <RadioButton Name="RbForceOverwrite" Content="強制覆蓋現有值" Margin="0,5"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <Button Name="BtnRun" Content="🚀 執行導入 (當前模型)" Height="40" Margin="0,20,0,0" Click="BtnRun_Click"/>
+                    </StackPanel>
+                </TabItem>
+
+                <TabItem Header="📚 批次處理">
+                    <Grid Margin="5">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+
+                        <GroupBox Header="1. 前置作業：建立參數 (選填)" Grid.Row="0" Margin="0,0,0,5">
+                            <StackPanel Margin="5">
+                                <CheckBox Name="CbRunParamCreation" Content="執行前先建立 COBie 參數" Margin="0,0,0,5" Checked="CbRunParamCreation_CheckedChanged" Unchecked="CbRunParamCreation_CheckedChanged"/>
+
+                                <Grid Name="GridParamSettings" IsEnabled="False">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <TextBox Name="TxtSharedParamPath_Batch" IsReadOnly="True" Height="23" Text="請選擇共用參數檔 (.txt)..." Foreground="Gray" VerticalContentAlignment="Center"/>
+                                    <Button Name="BtnSelectSPFile" Content="瀏覽..." Grid.Column="1" Width="50" Margin="5,0,0,0" Click="BtnSelectSPFile_Click"/>
+                                </Grid>
+
+                                <StackPanel Name="PanelParamOpts" IsEnabled="False" Margin="0,5,0,0">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,5">
+                                        <TextBlock Text="綁定對象：" VerticalAlignment="Center" Width="65"/>
+                                        <ComboBox Name="CmbCategoryMode" Width="150" Height="22" SelectedIndex="0">
+                                            <ComboBoxItem Content="MEP 常用類別"/>
+                                            <ComboBoxItem Content="所有模型類別 (All)"/>
+                                        </ComboBox>
+                                    </StackPanel>
+
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="參數群組：" VerticalAlignment="Center" Width="65"/>
+                                        <ComboBox Name="CmbGroups_Batch" Width="100" Margin="0,0,10,0" Height="22"/>
+                                        <CheckBox Name="CbVary_Batch" Content="Vary by Group" IsChecked="True" VerticalAlignment="Center"
+                                                  ToolTip="數值可隨群組實體變化"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="2. 選擇目標 Revit 模型資料夾" Grid.Row="1">
+                            <StackPanel Margin="5">
+                                <Button Content="📂 瀏覽資料夾..." Click="BtnSelectRvtFolder_Click" Margin="0,0,0,5"/>
+                            </StackPanel>
+                        </GroupBox>
+
+                        <GroupBox Header="待處理模型清單" Grid.Row="2" Margin="0,5">
+                            <ListBox Name="ListRvtFiles" Margin="2"/>
+                        </GroupBox>
+
+                        <StackPanel Grid.Row="3">
+                            <TextBlock Text="⚠️ 注意：程式將在背景開啟、修改並儲存檔案。" Foreground="Red" FontSize="10" Margin="0,5"/>
+                            <Button Name="BtnBatchRun" Content="📦 執行批次全自動作業" Height="40" Background="#FFF0F0" FontWeight="Bold" Click="BtnBatchRun_Click"/>
+                        </StackPanel>
+                    </Grid>
+                </TabItem>
+            </TabControl>
+        </Grid>
+    </Grid>
+</Window>
+--- END OF FILE ---
+
+--- FILE: MainWindow.xaml.cs ---
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
+using Autodesk.Revit.UI;
+using Autodesk.Revit.DB;
+using WinForms = System.Windows.Forms;
+using NPOI.SS.UserModel;
+using NPOI.XSSF.UserModel;
+
+namespace BIMDev_COBieAutomator
+{
+    public partial class MainWindow : Window
+    {
+        private UIApplication _uiapp;
+        private UIDocument _uidoc;
+        private Document _doc;
+
+        // 用來記憶上次路徑的變數
+        private string _lastExcelPath = "";
+        private string _lastRvtPath = "";
+        private string _lastSPPath = "";
+
+        public MainWindow(UIApplication uiapp)
+        {
+            InitializeComponent();
+
+            _uiapp = uiapp;
+            _uidoc = uiapp.ActiveUIDocument;
+
+            if (_uidoc != null)
+            {
+                _doc = _uidoc.Document;
+                TxtModelName.Text = _doc.Title;
+                TxtModelName.Foreground = Brushes.Blue;
+            }
+            else
+            {
+                _doc = null;
+                TxtModelName.Text = "(無開啟專案 - 僅限使用批次模式)";
+                TxtModelName.Foreground = Brushes.Gray;
+                if (BtnRun != null) BtnRun.IsEnabled = false;
+            }
+        }
+
+        // ============================================================
+        // UI 事件區 (左側 Excel) - 強制隔離路徑
+        // ============================================================
+        private void BtnSelectFolder_Click(object sender, RoutedEventArgs e)
+        {
+            WinForms.OpenFileDialog dialog = new WinForms.OpenFileDialog();
+            dialog.ValidateNames = false;
+            dialog.CheckFileExists = false;
+            dialog.CheckPathExists = true;
+            dialog.FileName = "選擇資料夾";
+            dialog.Title = "請選擇包含 B 表 (Excel) 的資料夾";
+            dialog.Filter = "資料夾|*.folder";
+            dialog.RestoreDirectory = true;
+
+            // ★ 邏輯修正：如果沒有記憶，就強制回桌面，避免被上一個按鈕影響
+            if (!string.IsNullOrEmpty(_lastExcelPath) && Directory.Exists(_lastExcelPath))
+            {
+                dialog.InitialDirectory = _lastExcelPath;
+            }
+            else
+            {
+                dialog.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            }
+
+            if (dialog.ShowDialog() == WinForms.DialogResult.OK)
+            {
+                string selectedPath = Path.GetDirectoryName(dialog.FileName);
+                _lastExcelPath = selectedPath; // 寫入記憶
+
+                if (!string.IsNullOrEmpty(selectedPath))
+                {
+                    string[] excelFiles = Directory.GetFiles(selectedPath, "*.xlsx");
+                    ListExcelFiles.Items.Clear();
+                    foreach (string file in excelFiles)
+                    {
+                        if (Path.GetFileName(file).StartsWith("~$")) continue;
+                        CheckBox cb = new CheckBox { Content = Path.GetFileName(file), Tag = file, IsChecked = true, Margin = new Thickness(2) };
+                        ListExcelFiles.Items.Add(cb);
+                    }
+                    if (ListExcelFiles.Items.Count == 0) MessageBox.Show("該資料夾內沒有 Excel 檔案");
+                }
+            }
+        }
+
+        private void BtnSelectAll_Click(object sender, RoutedEventArgs e) { foreach (CheckBox cb in ListExcelFiles.Items) cb.IsChecked = true; }
+        private void BtnUnselectAll_Click(object sender, RoutedEventArgs e) { foreach (CheckBox cb in ListExcelFiles.Items) cb.IsChecked = false; }
+
+
+        // ============================================================
+        // UI 事件區 (批次參數設定) - 強制隔離路徑
+        // ============================================================
+        private void CbRunParamCreation_CheckedChanged(object sender, RoutedEventArgs e)
+        {
+            bool enable = CbRunParamCreation.IsChecked == true;
+            if (GridParamSettings != null) GridParamSettings.IsEnabled = enable;
+            if (PanelParamOpts != null) PanelParamOpts.IsEnabled = enable;
+        }
+
+        private void BtnSelectSPFile_Click(object sender, RoutedEventArgs e)
+        {
+            WinForms.OpenFileDialog dlg = new WinForms.OpenFileDialog { Filter = "Shared Parameter (*.txt)|*.txt" };
+            dlg.RestoreDirectory = true;
+
+            // ★ 邏輯修正：如果沒有記憶，就強制回桌面
+            if (!string.IsNullOrEmpty(_lastSPPath) && Directory.Exists(_lastSPPath))
+            {
+                dlg.InitialDirectory = _lastSPPath;
+            }
+            else
+            {
+                dlg.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            }
+
+            if (dlg.ShowDialog() == WinForms.DialogResult.OK)
+            {
+                _lastSPPath = Path.GetDirectoryName(dlg.FileName); // 寫入記憶
+
+                TxtSharedParamPath_Batch.Text = dlg.FileName;
+                TxtSharedParamPath_Batch.Foreground = Brushes.Black;
+
+                try
+                {
+                    if (_doc != null)
+                    {
+                        _doc.Application.SharedParametersFilename = dlg.FileName;
+                        DefinitionFile spFile = _doc.Application.OpenSharedParameterFile();
+                        CmbGroups_Batch.Items.Clear();
+                        foreach (DefinitionGroup g in spFile.Groups) CmbGroups_Batch.Items.Add(g.Name);
+                    }
+                    else
+                    {
+                        string[] lines = File.ReadAllLines(dlg.FileName);
+                        CmbGroups_Batch.Items.Clear();
+                        foreach (string line in lines)
+                        {
+                            if (line.StartsWith("GROUP") && !line.StartsWith("GROUP\tID"))
+                            {
+                                string[] parts = line.Split('\t');
+                                if (parts.Length > 2) CmbGroups_Batch.Items.Add(parts[2]);
+                            }
+                        }
+                    }
+
+                    if (CmbGroups_Batch.Items.Contains("COBie")) CmbGroups_Batch.SelectedItem = "COBie";
+                    else if (CmbGroups_Batch.Items.Count > 0) CmbGroups_Batch.SelectedIndex = 0;
+                }
+                catch { }
+            }
+        }
+
+        private void BtnSelectRvtFolder_Click(object sender, RoutedEventArgs e)
+        {
+            WinForms.OpenFileDialog dialog = new WinForms.OpenFileDialog();
+            dialog.ValidateNames = false;
+            dialog.CheckFileExists = false;
+            dialog.CheckPathExists = true;
+            dialog.FileName = "選擇資料夾";
+            dialog.Title = "請選擇包含 Revit 模型 (.rvt) 的資料夾";
+            dialog.Filter = "資料夾|*.folder";
+            dialog.RestoreDirectory = true;
+
+            // ★ 邏輯修正：如果沒有記憶，就強制回桌面
+            if (!string.IsNullOrEmpty(_lastRvtPath) && Directory.Exists(_lastRvtPath))
+            {
+                dialog.InitialDirectory = _lastRvtPath;
+            }
+            else
+            {
+                dialog.InitialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            }
+
+            if (dialog.ShowDialog() == WinForms.DialogResult.OK)
+            {
+                string selectedPath = Path.GetDirectoryName(dialog.FileName);
+                _lastRvtPath = selectedPath; // 寫入記憶
+
+                if (!string.IsNullOrEmpty(selectedPath))
+                {
+                    string[] files = Directory.GetFiles(selectedPath, "*.rvt");
+                    ListRvtFiles.Items.Clear();
+                    foreach (string f in files)
+                    {
+                        if (f.Contains(".00") && f.EndsWith(".rvt")) continue;
+                        CheckBox cb = new CheckBox { Content = Path.GetFileName(f), Tag = f, IsChecked = true };
+                        ListRvtFiles.Items.Add(cb);
+                    }
+                    if (ListRvtFiles.Items.Count == 0) MessageBox.Show("該資料夾內沒有 Revit 模型");
+                }
+            }
+        }
+
+
+        // ============================================================
+        // 核心執行區 (以下保持不變)
+        // ============================================================
+
+        private void BtnRun_Click(object sender, RoutedEventArgs e)
+        {
+            if (_doc == null) return;
+            List<string> files = GetCheckedFiles(ListExcelFiles);
+            if (files.Count == 0) return;
+
+            using (Transaction t = new Transaction(_doc, "COBie 單機導入"))
+            {
+                t.Start();
+                string report = RunCOBieInjection(_doc, files, RbOnlyFillBlank.IsChecked == true, true);
+                t.Commit();
+                MessageBox.Show(report);
+            }
+        }
+
+        private void BtnBatchRun_Click(object sender, RoutedEventArgs e)
+        {
+            List<string> xlsFiles = GetCheckedFiles(ListExcelFiles);
+            List<string> rvtFiles = GetCheckedFiles(ListRvtFiles);
+            if (xlsFiles.Count == 0 || rvtFiles.Count == 0) { MessageBox.Show("請確認 Excel 與 Revit 檔案皆已選擇！"); return; }
+
+            bool doCreateParam = CbRunParamCreation.IsChecked == true;
+            string spPath = TxtSharedParamPath_Batch.Text;
+            string spGroup = CmbGroups_Batch.SelectedItem?.ToString();
+            bool spVary = CbVary_Batch.IsChecked == true;
+            bool bindToAll = (CmbCategoryMode.SelectedIndex == 1);
+
+            if (doCreateParam && (string.IsNullOrEmpty(spPath) || File.Exists(spPath) == false))
+            {
+                MessageBox.Show("請選擇有效的共用參數檔 (.txt)！"); return;
+            }
+
+            Autodesk.Revit.ApplicationServices.Application app = _uiapp.Application;
+
+            System.Text.StringBuilder batchLog = new System.Text.StringBuilder();
+            batchLog.AppendLine($"【批次全自動作業報告】 {DateTime.Now}");
+
+            foreach (string rvtPath in rvtFiles)
+            {
+                string rvtName = Path.GetFileName(rvtPath);
+                batchLog.AppendLine($"\n📂 處理模型: {rvtName}");
+
+                try
+                {
+                    Document bgDoc = app.OpenDocumentFile(rvtPath);
+
+                    using (Transaction t = new Transaction(bgDoc, "批次自動化作業"))
+                    {
+                        t.Start();
+
+                        if (doCreateParam)
+                        {
+                            string paramLog = RunBatchParameterCreation(bgDoc, app, spPath, spGroup, spVary, bindToAll);
+                            batchLog.AppendLine($"   ⚙️ 參數檢查/建立: {paramLog}");
+                        }
+
+                        string dataLog = RunCOBieInjection(bgDoc, xlsFiles, RbOnlyFillBlank.IsChecked == true, true);
+                        if (dataLog.Contains("嚴重錯誤")) batchLog.AppendLine("   ❌ 資料導入失敗");
+                        else batchLog.AppendLine("   ✅ 資料導入完成");
+
+                        t.Commit();
+                    }
+
+                    SaveOptions opts = new SaveOptions { Compact = true };
+                    bgDoc.Save(opts);
+                    bgDoc.Close(false);
+                    batchLog.AppendLine("   💾 存檔並關閉");
+                }
+                catch (Exception ex)
+                {
+                    batchLog.AppendLine($"   ❌ 嚴重錯誤: {ex.Message}");
+                }
+            }
+
+            MessageBox.Show(batchLog.ToString());
+        }
+
+        private string RunCOBieInjection(Document targetDoc, List<string> excelFiles, bool onlyFillBlank, bool ignoreTempFiles)
+        {
+            System.Text.StringBuilder log = new System.Text.StringBuilder();
+            int total = 0;
+
+            try
+            {
+                foreach (string filePath in excelFiles)
+                {
+                    string fileName = Path.GetFileName(filePath);
+                    if (ignoreTempFiles && fileName.StartsWith("~$")) continue;
+                    BuiltInCategory cat = GetCategoryFromFilename(filePath);
+                    if (cat == BuiltInCategory.INVALID) continue;
+
+                    FilteredElementCollector col = new FilteredElementCollector(targetDoc);
+                    IList<Element> elems = col.OfCategory(cat).WhereElementIsNotElementType().ToElements();
+                    if (elems.Count == 0) continue;
+
+                    using (FileStream fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                    {
+                        IWorkbook workbook = new XSSFWorkbook(fs);
+                        ISheet sheet = workbook.GetSheetAt(0);
+                        IRow header = sheet.GetRow(1);
+                        if (header == null) continue;
+
+                        Dictionary<string, int> map = new Dictionary<string, int>();
+                        for (int i = 0; i < header.LastCellNum; i++)
+                        {
+                            string h = header.GetCell(i)?.ToString().Trim();
+                            if (!string.IsNullOrEmpty(h) && h.StartsWith("Cobie_", StringComparison.OrdinalIgnoreCase))
+                                map["COBie_" + h.Substring(6)] = i;
+                        }
+                        if (map.Count == 0) continue;
+
+                        int count = 0;
+                        for (int r = 3; r <= sheet.LastRowNum; r++)
+                        {
+                            IRow row = sheet.GetRow(r);
+                            if (row == null) continue;
+                            string fName = row.GetCell(0)?.ToString().Trim();
+                            string tName = row.GetCell(1)?.ToString().Trim();
+                            if (string.IsNullOrEmpty(fName)) continue;
+
+                            foreach (Element el in elems)
+                            {
+                                Element type = targetDoc.GetElement(el.GetTypeId());
+                                if (type.get_Parameter(BuiltInParameter.SYMBOL_FAMILY_NAME_PARAM).AsString().Equals(fName, StringComparison.OrdinalIgnoreCase) &&
+                                    type.Name.Equals(tName, StringComparison.OrdinalIgnoreCase))
+                                {
+                                    foreach (var kvp in map)
+                                    {
+                                        string val = row.GetCell(kvp.Value)?.ToString().Trim();
+                                        Parameter p = el.LookupParameter(kvp.Key);
+                                        if (p != null && !p.IsReadOnly)
+                                        {
+                                            if (onlyFillBlank && p.HasValue && !string.IsNullOrEmpty(p.AsString())) continue;
+                                            p.Set(string.IsNullOrEmpty(val) ? "─" : val);
+                                            count++; total++;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        log.AppendLine($"更新 {fileName}: {count} 筆");
+                    }
+                }
+            }
+            catch (Exception ex) { log.AppendLine("Error: " + ex.Message); }
+            return log.ToString();
+        }
+
+        private string GetCellValue(IRow row, int cellIndex)
+        {
+            ICell cell = row.GetCell(cellIndex);
+            if (cell == null) return "";
+
+            if (cell.CellType == NPOI.SS.UserModel.CellType.Formula)
+            {
+                try { return cell.StringCellValue; }
+                catch { return cell.NumericCellValue.ToString(); }
+            }
+            return cell.ToString().Trim();
+        }
+
+        private string RunBatchParameterCreation(Document doc, Autodesk.Revit.ApplicationServices.Application app, string txtPath, string groupName, bool isVary, bool bindToAll)
+        {
+            try
+            {
+                app.SharedParametersFilename = txtPath;
+                DefinitionFile spFile = app.OpenSharedParameterFile();
+                if (spFile == null) return "無法讀取參數檔";
+
+                DefinitionGroup group = spFile.Groups.get_Item(groupName);
+                if (group == null) return $"找不到群組 {groupName}";
+
+                CategorySet catSet = app.Create.NewCategorySet();
+
+                if (bindToAll)
+                {
+                    foreach (Category cat in doc.Settings.Categories)
+                    {
+                        if (cat.AllowsBoundParameters &&
+                            (cat.CategoryType == CategoryType.Model) &&
+                            cat.CanAddSubcategory)
+                        {
+                            catSet.Insert(cat);
+                        }
+                    }
+                }
+                else
+                {
+                    BuiltInCategory[] cats = new BuiltInCategory[] {
+                        BuiltInCategory.OST_PipeAccessory, BuiltInCategory.OST_MechanicalEquipment,
+                        BuiltInCategory.OST_ElectricalFixtures, BuiltInCategory.OST_PlumbingFixtures,
+                        BuiltInCategory.OST_DuctAccessory, BuiltInCategory.OST_ElectricalEquipment,
+                        BuiltInCategory.OST_CableTray, BuiltInCategory.OST_Conduit,
+                        BuiltInCategory.OST_Sprinklers, BuiltInCategory.OST_LightingFixtures,
+                        BuiltInCategory.OST_CommunicationDevices, BuiltInCategory.OST_FireAlarmDevices,
+                        BuiltInCategory.OST_DataDevices, BuiltInCategory.OST_SecurityDevices,
+                        BuiltInCategory.OST_Doors, BuiltInCategory.OST_Windows,
+                        BuiltInCategory.OST_Walls, BuiltInCategory.OST_Floors
+                    };
+                    foreach (var bic in cats)
+                    {
+                        try { catSet.Insert(doc.Settings.Categories.get_Item(bic)); } catch { }
+                    }
+                }
+
+                int count = 0;
+                foreach (Definition def in group.Definitions)
+                {
+                    if (doc.ParameterBindings.Contains(def)) continue;
+
+                    InstanceBinding binding = app.Create.NewInstanceBinding(catSet);
+                    if (doc.ParameterBindings.Insert(def, binding, BuiltInParameterGroup.PG_DATA))
+                    {
+                        var map = doc.ParameterBindings;
+                        var it = map.ForwardIterator();
+                        it.Reset();
+                        while (it.MoveNext())
+                        {
+                            if (it.Key.Name == def.Name)
+                            {
+                                if (it.Key is InternalDefinition intDef)
+                                {
+                                    try { intDef.SetAllowVaryBetweenGroups(doc, isVary); } catch { }
+                                }
+                                break;
+                            }
+                        }
+                        count++;
+                    }
+                }
+                return $"新增 {count} 個參數";
+            }
+            catch (Exception ex)
+            {
+                return $"錯誤: {ex.Message}";
+            }
+        }
+
+        private List<string> GetCheckedFiles(ListBox list)
+        {
+            List<string> res = new List<string>();
+            foreach (CheckBox cb in list.Items)
+                if (cb.IsChecked == true) res.Add(cb.Tag.ToString());
+            return res;
+        }
+
+        private BuiltInCategory GetCategoryFromFilename(string filePath)
+        {
+            string fileName = System.IO.Path.GetFileNameWithoutExtension(filePath);
+            string categoryName = "";
+            if (fileName.Contains("-")) categoryName = fileName.Substring(fileName.LastIndexOf('-') + 1).Trim();
+
+            switch (categoryName)
+            {
+                case "Pipe Accessories": return BuiltInCategory.OST_PipeAccessory;
+                case "Plumbing Fixtures": return BuiltInCategory.OST_PlumbingFixtures;
+                case "Mechanical Equipment": return BuiltInCategory.OST_MechanicalEquipment;
+                case "Electrical Fixtures": return BuiltInCategory.OST_ElectricalFixtures;
+                case "Electrical Equipment": return BuiltInCategory.OST_ElectricalEquipment;
+                case "Duct Accessories": return BuiltInCategory.OST_DuctAccessory;
+                case "Communication Devices": return BuiltInCategory.OST_CommunicationDevices;
+                case "Conduit Fittings": return BuiltInCategory.OST_ConduitFitting;
+                case "Data Devices": return BuiltInCategory.OST_DataDevices;
+                case "Fire Alarm Devices": return BuiltInCategory.OST_FireAlarmDevices;
+                case "Lighting Devices": return BuiltInCategory.OST_LightingDevices;
+                case "Lighting Fixtures": return BuiltInCategory.OST_LightingFixtures;
+                case "Pipe Fittings": return BuiltInCategory.OST_PipeFitting;
+                case "Sprinklers": return BuiltInCategory.OST_Sprinklers;
+                case "Air Terminals": return BuiltInCategory.OST_DuctTerminal;
+                case "Telephone Devices": return BuiltInCategory.OST_TelephoneDevices;
+                case "Security Devices": return BuiltInCategory.OST_SecurityDevices;
+                default: return BuiltInCategory.INVALID;
+            }
+        }
+    }
+}
+--- END OF FILE ---
+
+--- FILE: packages.config ---
+﻿<?xml version="1.0" encoding="utf-8"?>
+<packages>
+  <package id="BouncyCastle.Cryptography" version="2.4.0" targetFramework="net48" />
+  <package id="Enums.NET" version="5.0.0" targetFramework="net48" />
+  <package id="ExtendedNumerics.BigDecimal" version="2025.1001.2.129" targetFramework="net48" />
+  <package id="MathNet.Numerics.Signed" version="5.0.0" targetFramework="net48" />
+  <package id="Microsoft.IO.RecyclableMemoryStream" version="3.0.1" targetFramework="net48" />
+  <package id="NPOI" version="2.5.6" targetFramework="net48" />
+  <package id="NSax" version="1.0.2" targetFramework="net48" />
+  <package id="Portable.BouncyCastle" version="1.8.9" targetFramework="net48" />
+  <package id="SharpZipLib" version="1.4.2" targetFramework="net48" />
+  <package id="SixLabors.Fonts" version="1.0.1" targetFramework="net48" />
+  <package id="SixLabors.ImageSharp" version="2.1.11" targetFramework="net48" />
+  <package id="System.Buffers" version="4.5.1" targetFramework="net48" />
+  <package id="System.Memory" version="4.5.5" targetFramework="net48" />
+  <package id="System.Numerics.Vectors" version="4.5.0" targetFramework="net48" />
+  <package id="System.Runtime.CompilerServices.Unsafe" version="6.0.0" targetFramework="net48" />
+  <package id="System.Security.Cryptography.Xml" version="8.0.2" targetFramework="net48" />
+  <package id="System.Text.Encoding.CodePages" version="5.0.0" targetFramework="net48" />
+  <package id="System.Threading.Tasks.Extensions" version="4.5.2" targetFramework="net48" />
+  <package id="ZString" version="2.6.0" targetFramework="net48" />
+</packages>
+--- END OF FILE ---
+
+--- FILE: ParameterWindow.xaml ---
+﻿<Window x:Class="BIMDev_COBieAutomator.ParameterWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="COBie 參數維護管理員" Height="650" Width="550" 
+        ResizeMode="CanResize" WindowStartupLocation="CenterScreen">
+
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="⚙️ 共用參數維護中心" FontSize="18" FontWeight="Bold" Margin="0,0,0,10"/>
+
+        <GroupBox Header="1. 共用參數來源設定 (.txt)" Grid.Row="1" Margin="0,0,0,10">
+            <StackPanel Margin="5">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBox Name="TxtSharedParamPath" IsReadOnly="True" Height="25" VerticalContentAlignment="Center"/>
+                    <Button Name="BtnSelectFile" Content="瀏覽..." Grid.Column="1" Width="60" Margin="5,0,0,0" Click="BtnSelectFile_Click"/>
+                </Grid>
+
+                <Grid Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="選擇目標群組：" VerticalAlignment="Center" Margin="0,0,5,0"/>
+                    <ComboBox Name="CmbGroups" Grid.Column="1" Height="25" SelectionChanged="CmbGroups_SelectionChanged"/>
+                </Grid>
+                <TextBlock Text="※ 請選擇如 'COBie' 等群組，切換群組將自動重新整理下方清單" Foreground="Gray" FontSize="10" Margin="0,5,0,0"/>
+            </StackPanel>
+        </GroupBox>
+
+        <TabControl Name="MainTabControl" Grid.Row="2" Margin="0,0,0,10" SelectionChanged="MainTabControl_SelectionChanged">
+
+            <TabItem Header="➕ 新增參數" Name="TabAdd">
+                <Grid Margin="5">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <GroupBox Header="選擇要新增的參數 (灰色代表已存在)" Grid.Row="0">
+                        <ListBox Name="ListParamsToAdd" Margin="5" ScrollViewer.VerticalScrollBarVisibility="Auto"/>
+                    </GroupBox>
+
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,5">
+                        <Button Content="全選" Width="50" Click="BtnSelectAllParams_Click" Margin="0,0,5,0"/>
+                        <Button Content="全不選" Width="50" Click="BtnUnselectAllParams_Click"/>
+                    </StackPanel>
+
+                    <GroupBox Header="綁定目標 Category" Grid.Row="2" Height="150" Margin="0,5">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <ListBox Name="ListCategories" Grid.Row="0" Margin="5"/>
+                            <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Right" Margin="5">
+                                <Button Content="全選" Width="50" Click="BtnSelectAllCats_Click" Margin="0,0,5,0"/>
+                                <Button Content="全不選" Width="50" Click="BtnUnselectAllCats_Click"/>
+                            </StackPanel>
+                        </Grid>
+                    </GroupBox>
+
+                    <CheckBox Name="CbVaryByGroup" Grid.Row="3" Content="數值可隨群組實體變化 (Vary by Group)" IsChecked="True" Margin="0,5,0,5"/>
+
+                    <Button Name="BtnCreate" Content="🚀 執行新增" Grid.Row="4" Height="35" Background="#E0FFE0" FontWeight="Bold" Click="BtnCreate_Click"/>
+                </Grid>
+            </TabItem>
+
+            <TabItem Header="🗑️ 移除參數" Name="TabRemove">
+                <Grid Margin="5">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Text="⚠️ 注意：這將從專案中永久移除選定的參數，無需 TXT 檔即可操作。" Foreground="Red" Margin="0,0,0,5"/>
+
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,5">
+                        <TextBlock Text="參數名稱關鍵字：" VerticalAlignment="Center"/>
+                        <TextBox Name="TxtRemoveFilter" Text="COBie" Width="100" Margin="5,0,0,0" VerticalContentAlignment="Center"/>
+                        <Button Content="🔍 掃描專案" Width="80" Margin="5,0,0,0" Click="BtnScanProject_Click"/>
+                    </StackPanel>
+
+                    <GroupBox Header="搜尋結果 (存在於本專案的參數)" Grid.Row="2">
+                        <ListBox Name="ListParamsToRemove" Margin="5">
+                        </ListBox>
+                    </GroupBox>
+
+                    <StackPanel Grid.Row="3">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,5">
+                            <Button Content="全選" Width="50" Click="BtnSelectAllRemove_Click" Margin="0,0,5,0"/>
+                            <Button Content="全不選" Width="50" Click="BtnUnselectAllRemove_Click"/>
+                        </StackPanel>
+                        <Button Name="BtnRemove" Content="💣 執行移除" Height="35" Background="#FFE0E0" FontWeight="Bold" Click="BtnRemove_Click"/>
+                    </StackPanel>
+                </Grid>
+            </TabItem>
+
+        </TabControl>
+    </Grid>
+</Window>
+--- END OF FILE ---
+
+--- FILE: ParameterWindow.xaml.cs ---
+﻿using System;
+using System.IO;
+using System.Collections.Generic;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media; // 用來設定灰色字體
+using Autodesk.Revit.UI;
+using Autodesk.Revit.DB;
+using WinForms = System.Windows.Forms;
+
+namespace BIMDev_COBieAutomator
+{
+    public partial class ParameterWindow : Window
+    {
+        private UIDocument _uidoc;
+        private Document _doc;
+        private Autodesk.Revit.ApplicationServices.Application _app;
+
+        public ParameterWindow(UIDocument uidoc)
+        {
+            InitializeComponent();
+            _uidoc = uidoc;
+            _doc = uidoc.Document;
+            _app = _doc.Application;
+
+            LoadAllRevitCategories();
+        }
+
+        // 1. 載入 Categories
+        private void LoadAllRevitCategories()
+        {
+            ListCategories.Items.Clear();
+            List<Category> allCats = new List<Category>();
+
+            foreach (Category cat in _doc.Settings.Categories)
+            {
+                if (cat.AllowsBoundParameters)
+                {
+                    if (!string.IsNullOrEmpty(cat.Name)) allCats.Add(cat);
+                }
+            }
+
+            var sortedCats = allCats.OrderBy(c => c.Name).ToList();
+
+            foreach (Category cat in sortedCats)
+            {
+                CheckBox cb = new CheckBox();
+                cb.Content = cat.Name;
+                cb.Tag = cat;
+                if (IsCommonMEPCategory(cat)) cb.IsChecked = true;
+                ListCategories.Items.Add(cb);
+            }
+        }
+
+        private bool IsCommonMEPCategory(Category cat)
+        {
+            BuiltInCategory bic = (BuiltInCategory)cat.Id.IntegerValue;
+            return bic == BuiltInCategory.OST_PipeAccessory ||
+                   bic == BuiltInCategory.OST_PipeFitting ||
+                   bic == BuiltInCategory.OST_MechanicalEquipment ||
+                   bic == BuiltInCategory.OST_ElectricalFixtures ||
+                   bic == BuiltInCategory.OST_ElectricalEquipment ||
+                   bic == BuiltInCategory.OST_PlumbingFixtures ||
+                   bic == BuiltInCategory.OST_DuctAccessory ||
+                   bic == BuiltInCategory.OST_DuctTerminal ||
+                   bic == BuiltInCategory.OST_CableTray ||
+                   bic == BuiltInCategory.OST_Conduit ||
+                   bic == BuiltInCategory.OST_Sprinklers ||
+                   bic == BuiltInCategory.OST_LightingFixtures;
+        }
+
+        // ============================================================
+        // ★ 新增：分頁切換與搜尋事件 (作法 B 核心)
+        // ============================================================
+
+        // 當使用者切換分頁時觸發
+        private void MainTabControl_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            // 確保是 TabControl 本身觸發的，避免被內部的 ListBox 干擾
+            if (e.Source is TabControl)
+            {
+                // 如果切換到「移除參數」分頁 (TabRemove)，自動掃描專案
+                if (TabRemove != null && TabRemove.IsSelected)
+                {
+                    ScanProjectParameters();
+                }
+            }
+        }
+
+        // 手動點擊「掃描專案」按鈕
+        private void BtnScanProject_Click(object sender, RoutedEventArgs e)
+        {
+            ScanProjectParameters();
+        }
+
+        // ★ 核心邏輯：直接掃描專案參數 (不需要 TXT)
+        private void ScanProjectParameters()
+        {
+            ListParamsToRemove.Items.Clear();
+            string keyword = TxtRemoveFilter.Text.Trim(); // 取得關鍵字，預設 "COBie"
+
+            // 取得專案中所有的參數綁定
+            BindingMap map = _doc.ParameterBindings;
+            DefinitionBindingMapIterator it = map.ForwardIterator();
+            it.Reset();
+
+            List<Definition> foundDefs = new List<Definition>();
+
+            while (it.MoveNext())
+            {
+                Definition def = it.Key;
+
+                // 過濾邏輯：
+                // 1. 名字包含關鍵字 (忽略大小寫)
+                // 2. 如果沒輸入關鍵字，就列出全部 (由使用者自行決定)
+                if (!string.IsNullOrEmpty(keyword))
+                {
+                    if (def.Name.IndexOf(keyword, StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        foundDefs.Add(def);
+                    }
+                }
+                else
+                {
+                    foundDefs.Add(def);
+                }
+            }
+
+            // 排序並顯示
+            var sortedDefs = foundDefs.OrderBy(d => d.Name).ToList();
+
+            foreach (Definition def in sortedDefs)
+            {
+                CheckBox cb = new CheckBox();
+                cb.Content = def.Name;
+                cb.Tag = def; // 藏 Definition 物件，之後刪除要用
+                cb.IsChecked = false; // 預設不勾選
+                ListParamsToRemove.Items.Add(cb);
+            }
+        }
+
+        // ============================================================
+        // TXT 檔案讀取區 (Tab 1 專用)
+        // ============================================================
+        private void BtnSelectFile_Click(object sender, RoutedEventArgs e)
+        {
+            WinForms.OpenFileDialog openFileDialog = new WinForms.OpenFileDialog();
+            openFileDialog.Filter = "Shared Parameter Files (*.txt)|*.txt";
+            if (openFileDialog.ShowDialog() == WinForms.DialogResult.OK)
+            {
+                TxtSharedParamPath.Text = openFileDialog.FileName;
+                LoadGroupsFromFile(openFileDialog.FileName);
+            }
+        }
+
+        private void LoadGroupsFromFile(string path)
+        {
+            string originalPath = _app.SharedParametersFilename;
+            try
+            {
+                _app.SharedParametersFilename = path;
+                DefinitionFile spFile = _app.OpenSharedParameterFile();
+                if (spFile != null)
+                {
+                    CmbGroups.Items.Clear();
+                    foreach (DefinitionGroup group in spFile.Groups)
+                    {
+                        CmbGroups.Items.Add(group.Name);
+                    }
+                    if (CmbGroups.Items.Contains("COBie")) CmbGroups.SelectedItem = "COBie";
+                    else if (CmbGroups.Items.Count > 0) CmbGroups.SelectedIndex = 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"讀取失敗：{ex.Message}");
+            }
+            finally
+            {
+                // _app.SharedParametersFilename = originalPath;
+            }
+        }
+
+        private void CmbGroups_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (CmbGroups.SelectedItem == null) return;
+            string groupName = CmbGroups.SelectedItem.ToString();
+            RefreshParameterLists(groupName);
+        }
+
+        // ★ 修改後的核心邏輯：只負責刷新 Tab 1 (新增清單)
+        private void RefreshParameterLists(string groupName)
+        {
+            ListParamsToAdd.Items.Clear();
+            // 注意：這裡不再操作 ListParamsToRemove，因為那是 Tab 2 的工作
+
+            string spPath = TxtSharedParamPath.Text;
+            if (string.IsNullOrEmpty(spPath)) return;
+
+            try
+            {
+                _app.SharedParametersFilename = spPath;
+                DefinitionFile spFile = _app.OpenSharedParameterFile();
+                if (spFile == null) return;
+                DefinitionGroup group = spFile.Groups.get_Item(groupName);
+                if (group == null) return;
+
+                foreach (Definition def in group.Definitions)
+                {
+                    bool existsInProject = _doc.ParameterBindings.Contains(def);
+
+                    // --- 處理「新增清單」 ---
+                    CheckBox cbAdd = new CheckBox();
+                    cbAdd.Tag = def;
+
+                    if (existsInProject)
+                    {
+                        // 已存在：變灰、不能勾選
+                        cbAdd.Content = $"{def.Name} (已存在)";
+                        cbAdd.Foreground = Brushes.Gray;
+                        cbAdd.IsEnabled = false;
+                        cbAdd.IsChecked = false;
+                    }
+                    else
+                    {
+                        // 不存在：正常顯示
+                        cbAdd.Content = def.Name;
+                        cbAdd.Foreground = Brushes.Black;
+                        cbAdd.IsEnabled = true;
+                        cbAdd.IsChecked = true;
+                    }
+                    ListParamsToAdd.Items.Add(cbAdd);
+                }
+            }
+            catch { }
+        }
+
+        // ============================================================
+        // 執行新增
+        // ============================================================
+        private void BtnCreate_Click(object sender, RoutedEventArgs e)
+        {
+            CategorySet catSet = _app.Create.NewCategorySet();
+            foreach (CheckBox cb in ListCategories.Items)
+            {
+                if (cb.IsChecked == true) catSet.Insert(cb.Tag as Category);
+            }
+            if (catSet.IsEmpty) { MessageBox.Show("請至少勾選一個 Category！"); return; }
+
+            List<Definition> defsToAdd = new List<Definition>();
+            foreach (CheckBox cb in ListParamsToAdd.Items)
+            {
+                if (cb.IsEnabled && cb.IsChecked == true)
+                {
+                    defsToAdd.Add(cb.Tag as Definition);
+                }
+            }
+            if (defsToAdd.Count == 0) { MessageBox.Show("請選擇要新增的參數！"); return; }
+
+            bool isVary = CbVaryByGroup.IsChecked == true;
+
+            using (Transaction t = new Transaction(_doc, "新增參數"))
+            {
+                t.Start();
+                int count = 0;
+                try
+                {
+                    foreach (Definition def in defsToAdd)
+                    {
+                        if (_doc.ParameterBindings.Contains(def)) continue;
+
+                        InstanceBinding binding = _app.Create.NewInstanceBinding(catSet);
+                        if (_doc.ParameterBindings.Insert(def, binding, BuiltInParameterGroup.PG_DATA))
+                        {
+                            var map = _doc.ParameterBindings;
+                            var it = map.ForwardIterator();
+                            it.Reset();
+                            while (it.MoveNext())
+                            {
+                                if (it.Key.Name == def.Name)
+                                {
+                                    if (it.Key is InternalDefinition intDef)
+                                    {
+                                        try { intDef.SetAllowVaryBetweenGroups(_doc, isVary); } catch { }
+                                    }
+                                    break;
+                                }
+                            }
+                            count++;
+                        }
+                    }
+                    t.Commit();
+                    MessageBox.Show($"成功新增 {count} 個參數！");
+
+                    // 執行完畢後，重新整理 Tab 1
+                    if (CmbGroups.SelectedItem != null)
+                        RefreshParameterLists(CmbGroups.SelectedItem.ToString());
+                }
+                catch (Exception ex)
+                {
+                    t.RollBack();
+                    MessageBox.Show($"錯誤：{ex.Message}");
+                }
+            }
+        }
+
+        // ============================================================
+        // 執行移除 (修改版：搭配 ScanProjectParameters)
+        // ============================================================
+        private void BtnRemove_Click(object sender, RoutedEventArgs e)
+        {
+            List<Definition> defsToRemove = new List<Definition>();
+            foreach (CheckBox cb in ListParamsToRemove.Items)
+            {
+                if (cb.IsChecked == true) defsToRemove.Add(cb.Tag as Definition);
+            }
+
+            if (defsToRemove.Count == 0) { MessageBox.Show("請勾選要移除的參數！"); return; }
+
+            if (MessageBox.Show($"確定要永久刪除這 {defsToRemove.Count} 個參數嗎？\n這將會清除模型中所有元件上的相關資料！",
+                "警告", MessageBoxButton.YesNo, MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            {
+                return;
+            }
+
+            using (Transaction t = new Transaction(_doc, "移除參數"))
+            {
+                t.Start();
+                int count = 0;
+                try
+                {
+                    foreach (Definition def in defsToRemove)
+                    {
+                        try
+                        {
+                            _doc.ParameterBindings.Remove(def);
+                            count++;
+                        }
+                        catch { }
+                    }
+                    t.Commit();
+                    MessageBox.Show($"成功移除 {count} 個參數！");
+
+                    // 執行完畢後，重新掃描 Tab 2
+                    ScanProjectParameters();
+
+                    // 如果 Tab 1 也有選群組，順便刷新一下 (讓灰色變回黑色)
+                    if (CmbGroups.SelectedItem != null)
+                        RefreshParameterLists(CmbGroups.SelectedItem.ToString());
+                }
+                catch (Exception ex)
+                {
+                    t.RollBack();
+                    MessageBox.Show($"錯誤：{ex.Message}");
+                }
+            }
+        }
+
+        // ============================================================
+        // 全選/全不選按鈕事件
+        // ============================================================
+        private void BtnSelectAllParams_Click(object sender, RoutedEventArgs e) { SetAllChecks(ListParamsToAdd, true); }
+        private void BtnUnselectAllParams_Click(object sender, RoutedEventArgs e) { SetAllChecks(ListParamsToAdd, false); }
+
+        private void BtnSelectAllCats_Click(object sender, RoutedEventArgs e) { SetAllChecks(ListCategories, true); }
+        private void BtnUnselectAllCats_Click(object sender, RoutedEventArgs e) { SetAllChecks(ListCategories, false); }
+
+        private void BtnSelectAllRemove_Click(object sender, RoutedEventArgs e) { SetAllChecks(ListParamsToRemove, true); }
+        private void BtnUnselectAllRemove_Click(object sender, RoutedEventArgs e) { SetAllChecks(ListParamsToRemove, false); }
+
+        private void SetAllChecks(ListBox list, bool check)
+        {
+            foreach (CheckBox cb in list.Items)
+            {
+                if (cb.IsEnabled) cb.IsChecked = check;
+            }
+        }
+    }
+}
+--- END OF FILE ---
