@@ -1,9 +1,11 @@
 ﻿using System;
-using System.Reflection; // 用來抓 DLL 路徑
 using System.Collections.Generic;
-using Autodesk.Revit.UI;
-using Autodesk.Revit.DB;
+using System.IO; // 為了讀取串流
+using System.Reflection; // 為了讀取內嵌資源 & DLL 路徑
+using System.Windows.Media.Imaging; // 為了轉換成 Revit 看得懂的圖片格式
 using Autodesk.Revit.Attributes;
+using Autodesk.Revit.DB;
+using Autodesk.Revit.UI;
 
 namespace BIMDev_COBieAutomator
 {
@@ -54,22 +56,29 @@ namespace BIMDev_COBieAutomator
                 "BIMDev_COBieAutomator.Command" // 對應的 C# 類別全名 (Namespace.Class)
             );
             btnData1.AvailabilityClassName = "BIMDev_COBieAutomator.CommandAvailability";
-            btnData1.ToolTip = "讀取 Excel B表並寫入 Revit 元件參數";
+            btnData1.ToolTip = "讀取已進行Mapping之Excel表並寫入Revit元件參數";
+
+            // ★ 設定圖示 (記得圖片 Build Action 要改為 Embedded Resource)
+            btnData1.LargeImage = GetEmbeddedImage("Import_32.png");
+
 
             // =======================================================
             // ★ 按鈕 2: 參數建立 (對應 CommandParameter.cs)
             // =======================================================
             PushButtonData btnData2 = new PushButtonData(
-                "BtnCreateParam",       
-                "共用參數\n維護",       // ★ 修改這裡：原本是 "參數\n批次建立"
-                assemblyPath,           
-                "BIMDev_COBieAutomator.CommandParameter" 
+                "BtnCreateParam",
+                "共用參數維護",
+                assemblyPath,
+                "BIMDev_COBieAutomator.CommandParameter"
             );
             btnData2.ToolTip = "讀取共用參數檔 (.txt) 並批次綁定、新增或移除模型參數";
 
+            // ★ 設定圖示
+            btnData2.LargeImage = GetEmbeddedImage("Param_32.png");
+
             // 4. 將按鈕加入面板
             panel.AddItem(btnData1);
-            panel.AddSeparator(); // 加個分隔線
+            // panel.AddSeparator(); // 視需求決定要不要分隔線，現在有圖示通常不用分隔線也很好看
             panel.AddItem(btnData2);
 
             return Result.Succeeded;
@@ -78,6 +87,39 @@ namespace BIMDev_COBieAutomator
         public Result OnShutdown(UIControlledApplication application)
         {
             return Result.Succeeded;
+        }
+
+        // =======================================================
+        // ★ 輔助方法：從 DLL 的嵌入資源中讀取圖片
+        // =======================================================
+        public BitmapImage GetEmbeddedImage(string name)
+        {
+            try
+            {
+                // 1. 取得目前的 Assembly (也就是這個 DLL 自己)
+                Assembly assembly = Assembly.GetExecutingAssembly();
+
+                // 2. 組合資源名稱
+                // 格式通常是：[專案Namespace].[資料夾名稱].[檔名.副檔名]
+                // 請確認你的 Namespace 是 BIMDev_COBieAutomator，且資料夾叫 Resources
+                string resourceName = $"BIMDev_COBieAutomator.Resources.{name}";
+
+                using (Stream stream = assembly.GetManifestResourceStream(resourceName))
+                {
+                    if (stream == null) return null;
+
+                    BitmapImage image = new BitmapImage();
+                    image.BeginInit();
+                    image.StreamSource = stream;
+                    image.CacheOption = BitmapCacheOption.OnLoad;
+                    image.EndInit();
+                    return image;
+                }
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 }
