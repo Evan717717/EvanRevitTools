@@ -330,7 +330,7 @@ namespace BIMDev_COBieAutomator
                                 {
                                     foreach (var kvp in map)
                                     {
-                                        string val = row.GetCell(kvp.Value)?.ToString().Trim();
+                                        string val = GetCellValue(row, kvp.Value);
                                         Parameter p = el.LookupParameter(kvp.Key);
                                         if (p != null && !p.IsReadOnly)
                                         {
