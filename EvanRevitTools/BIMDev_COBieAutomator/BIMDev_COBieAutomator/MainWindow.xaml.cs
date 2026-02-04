@@ -219,7 +219,6 @@ namespace BIMDev_COBieAutomator
 
         // 2. 批次執行
 
-        // 2. 批次執行
         private void BtnBatchRun_Click(object sender, RoutedEventArgs e)
         {
             // 1. 基本檢查
