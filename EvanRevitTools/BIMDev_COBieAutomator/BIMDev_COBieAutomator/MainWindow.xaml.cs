@@ -217,18 +217,24 @@ namespace BIMDev_COBieAutomator
             }
         }
 
+        // 2. 批次執行
+
+        // 2. 批次執行
         private void BtnBatchRun_Click(object sender, RoutedEventArgs e)
         {
+            // 1. 基本檢查
             List<string> xlsFiles = GetCheckedFiles(ListExcelFiles);
             List<string> rvtFiles = GetCheckedFiles(ListRvtFiles);
             if (xlsFiles.Count == 0 || rvtFiles.Count == 0) { MessageBox.Show("請確認 Excel 與 Revit 檔案皆已選擇！"); return; }
 
+            // 2. 參數讀取
             bool doCreateParam = CbRunParamCreation.IsChecked == true;
             string spPath = TxtSharedParamPath_Batch.Text;
             string spGroup = CmbGroups_Batch.SelectedItem?.ToString();
             bool spVary = CbVary_Batch.IsChecked == true;
-            bool bindToAll = (CmbCategoryMode.SelectedIndex == 1);
+            bool bindToAll = (CmbCategoryMode.SelectedIndex == 1); // 0=MEP, 1=All
 
+            // 3. 防呆檢查
             if (doCreateParam && (string.IsNullOrEmpty(spPath) || File.Exists(spPath) == false))
             {
                 MessageBox.Show("請選擇有效的共用參數檔 (.txt)！"); return;
@@ -246,18 +252,38 @@ namespace BIMDev_COBieAutomator
 
                 try
                 {
-                    Document bgDoc = app.OpenDocumentFile(rvtPath);
+                    // ====================================================
+                    // ★★★ 修改點 1：正確的開啟策略 (修正 ModelPath 錯誤) ★★★
+                    // ====================================================
+
+                    OpenOptions openOpts = new OpenOptions();
+
+                    // 檢查檔案是否為工作共用 (Workshared)
+                    BasicFileInfo fileInfo = BasicFileInfo.Extract(rvtPath);
+                    if (fileInfo.IsWorkshared)
+                    {
+                        // 關鍵：使用 DetachAndPreserveWorksets
+                        openOpts.DetachFromCentralOption = DetachFromCentralOption.DetachAndPreserveWorksets;
+                    }
+
+                    // ★ 修正：將 string 路徑轉換為 ModelPath 物件
+                    ModelPath modelPath = ModelPathUtils.ConvertUserVisiblePathToModelPath(rvtPath);
+
+                    // 使用 ModelPath 與設定好的選項開啟模型
+                    Document bgDoc = app.OpenDocumentFile(modelPath, openOpts);
 
                     using (Transaction t = new Transaction(bgDoc, "批次自動化作業"))
                     {
                         t.Start();
 
+                        // --- 步驟 A: 建立參數 ---
                         if (doCreateParam)
                         {
                             string paramLog = RunBatchParameterCreation(bgDoc, app, spPath, spGroup, spVary, bindToAll);
                             batchLog.AppendLine($"   ⚙️ 參數檢查/建立: {paramLog}");
                         }
 
+                        // --- 步驟 B: 導入資料 ---
                         string dataLog = RunCOBieInjection(bgDoc, xlsFiles, RbOnlyFillBlank.IsChecked == true, true);
                         if (dataLog.Contains("嚴重錯誤")) batchLog.AppendLine("   ❌ 資料導入失敗");
                         else batchLog.AppendLine("   ✅ 資料導入完成");
@@ -265,10 +291,40 @@ namespace BIMDev_COBieAutomator
                         t.Commit();
                     }
 
-                    SaveOptions opts = new SaveOptions { Compact = true };
-                    bgDoc.Save(opts);
+                    // ====================================================
+                    // ★★★ 修改點 2：智慧存檔 (將分離後的檔案重置為中央檔案) ★★★
+                    // ====================================================
+
+                    if (bgDoc.IsWorkshared)
+                    {
+                        // 準備另存設定
+                        SaveAsOptions saveAsOpts = new SaveAsOptions();
+                        saveAsOpts.OverwriteExistingFile = true; // 允許覆蓋
+                        saveAsOpts.Compact = true; // 壓縮瘦身
+
+                        // 設定工作集與中央檔案選項
+                        WorksharingSaveAsOptions wsOpts = new WorksharingSaveAsOptions();
+                        wsOpts.SaveAsCentral = true; // ★關鍵：存檔後變成正式的中央模型
+
+                        // 設定開啟預設值為 "Specify" (指定)，加快開檔速度
+                        wsOpts.OpenWorksetsDefault = SimpleWorksetConfiguration.AskUserToSpecify;
+
+                        saveAsOpts.SetWorksharingOptions(wsOpts);
+
+                        // 執行另存新檔 (原地覆蓋)
+                        bgDoc.SaveAs(rvtPath, saveAsOpts);
+                        batchLog.AppendLine("   💾 已重置為中央檔案 (設定為: 指定工作集)");
+                    }
+                    else
+                    {
+                        // 普通單機檔，照舊處理
+                        SaveOptions opts = new SaveOptions { Compact = true };
+                        bgDoc.Save(opts);
+                        batchLog.AppendLine("   💾 存檔完成 (一般模型)");
+                    }
+
+                    // 關閉檔案
                     bgDoc.Close(false);
-                    batchLog.AppendLine("   💾 存檔並關閉");
                 }
                 catch (Exception ex)
                 {
