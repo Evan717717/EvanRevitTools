@@ -232,7 +232,7 @@ namespace BIMDev_COBieAutomator
             string spPath = TxtSharedParamPath_Batch.Text;
             string spGroup = CmbGroups_Batch.SelectedItem?.ToString();
             bool spVary = CbVary_Batch.IsChecked == true;
-            bool bindToAll = (CmbCategoryMode.SelectedIndex == 1); // 0=MEP, 1=All
+            bool bindToAll = (CmbCategoryMode.SelectedIndex == 1);
 
             // 3. 防呆檢查
             if (doCreateParam && (string.IsNullOrEmpty(spPath) || File.Exists(spPath) == false))
@@ -241,35 +241,35 @@ namespace BIMDev_COBieAutomator
             }
 
             Autodesk.Revit.ApplicationServices.Application app = _uiapp.Application;
-
             System.Text.StringBuilder batchLog = new System.Text.StringBuilder();
-            batchLog.AppendLine($"【批次全自動作業報告】 {DateTime.Now}");
+            batchLog.AppendLine($"【批次全自動作業報告 (同步模式)】 {DateTime.Now}");
 
             foreach (string rvtPath in rvtFiles)
             {
                 string rvtName = Path.GetFileName(rvtPath);
                 batchLog.AppendLine($"\n📂 處理模型: {rvtName}");
 
+                // 定義臨時本機檔路徑 (避免直接開中央檔造成鎖定或警告)
+                string tempLocalPath = Path.Combine(Path.GetTempPath(), rvtName);
+
                 try
                 {
                     // ====================================================
-                    // ★★★ 修改點 1：正確的開啟策略 (修正 ModelPath 錯誤) ★★★
+                    // ★ 策略：建立臨時本機檔 -> 修改 -> 同步回中央
                     // ====================================================
 
+                    // 1. 複製檔案到 Temp 資料夾 (這動作等於建立了本機檔)
+                    File.Copy(rvtPath, tempLocalPath, true);
+
+                    // 2. 準備開啟選項
                     OpenOptions openOpts = new OpenOptions();
+                    // 關閉所有工作集以加速開啟 (Optional)
+                    openOpts.SetOpenWorksetsConfiguration(new WorksetConfiguration(WorksetConfigurationOption.CloseAllWorksets));
 
-                    // 檢查檔案是否為工作共用 (Workshared)
-                    BasicFileInfo fileInfo = BasicFileInfo.Extract(rvtPath);
-                    if (fileInfo.IsWorkshared)
-                    {
-                        // 關鍵：使用 DetachAndPreserveWorksets
-                        openOpts.DetachFromCentralOption = DetachFromCentralOption.DetachAndPreserveWorksets;
-                    }
+                    // ★★★ 修正點：將字串路徑轉換為 ModelPath (解決 CS1503 錯誤) ★★★
+                    ModelPath modelPath = ModelPathUtils.ConvertUserVisiblePathToModelPath(tempLocalPath);
 
-                    // ★ 修正：將 string 路徑轉換為 ModelPath 物件
-                    ModelPath modelPath = ModelPathUtils.ConvertUserVisiblePathToModelPath(rvtPath);
-
-                    // 使用 ModelPath 與設定好的選項開啟模型
+                    // 使用 ModelPath 開啟模型
                     Document bgDoc = app.OpenDocumentFile(modelPath, openOpts);
 
                     using (Transaction t = new Transaction(bgDoc, "批次自動化作業"))
@@ -292,43 +292,46 @@ namespace BIMDev_COBieAutomator
                     }
 
                     // ====================================================
-                    // ★★★ 修改點 2：智慧存檔 (將分離後的檔案重置為中央檔案) ★★★
+                    // ★ 關鍵動作：同步回中央 (Synchronize)
                     // ====================================================
-
                     if (bgDoc.IsWorkshared)
                     {
-                        // 準備另存設定
-                        SaveAsOptions saveAsOpts = new SaveAsOptions();
-                        saveAsOpts.OverwriteExistingFile = true; // 允許覆蓋
-                        saveAsOpts.Compact = true; // 壓縮瘦身
+                        // 設定同步選項
+                        SynchronizeWithCentralOptions syncOpts = new SynchronizeWithCentralOptions();
+                        syncOpts.Compact = true; // 執行壓縮
 
-                        // 設定工作集與中央檔案選項
-                        WorksharingSaveAsOptions wsOpts = new WorksharingSaveAsOptions();
-                        wsOpts.SaveAsCentral = true; // ★關鍵：存檔後變成正式的中央模型
+                        // 設定要釋放的權限 (全部釋放)
+                        RelinquishOptions relinquishOpts = new RelinquishOptions(true);
+                        relinquishOpts.CheckedOutElements = true;
+                        relinquishOpts.StandardWorksets = true;
+                        relinquishOpts.UserWorksets = true;
+                        relinquishOpts.FamilyWorksets = true;
+                        relinquishOpts.ViewWorksets = true;
+                        syncOpts.SetRelinquishOptions(relinquishOpts);
 
-                        // 設定開啟預設值為 "Specify" (指定)，加快開檔速度
-                        wsOpts.OpenWorksetsDefault = SimpleWorksetConfiguration.AskUserToSpecify;
+                        // 設定同步時的註解
+                        TransactWithCentralOptions transOpts = new TransactWithCentralOptions();
 
-                        saveAsOpts.SetWorksharingOptions(wsOpts);
-
-                        // 執行另存新檔 (原地覆蓋)
-                        bgDoc.SaveAs(rvtPath, saveAsOpts);
-                        batchLog.AppendLine("   💾 已重置為中央檔案 (設定為: 指定工作集)");
+                        // 執行同步
+                        bgDoc.SynchronizeWithCentral(transOpts, syncOpts);
+                        batchLog.AppendLine("   🔄 已同步回中央檔案 (含壓縮)");
                     }
                     else
                     {
-                        // 普通單機檔，照舊處理
-                        SaveOptions opts = new SaveOptions { Compact = true };
-                        bgDoc.Save(opts);
-                        batchLog.AppendLine("   💾 存檔完成 (一般模型)");
+                        // 如果不是工作共用檔，就直接存檔覆蓋回原路徑
+                        bgDoc.Close(false);
+                        File.Copy(tempLocalPath, rvtPath, true);
+                        batchLog.AppendLine("   💾 單機檔已覆蓋儲存");
                     }
 
-                    // 關閉檔案
-                    bgDoc.Close(false);
+                    // 關閉並刪除臨時檔
+                    if (bgDoc.IsValidObject) bgDoc.Close(false);
+                    if (File.Exists(tempLocalPath)) File.Delete(tempLocalPath);
                 }
                 catch (Exception ex)
                 {
                     batchLog.AppendLine($"   ❌ 嚴重錯誤: {ex.Message}");
+                    try { if (File.Exists(tempLocalPath)) File.Delete(tempLocalPath); } catch { }
                 }
             }
 
