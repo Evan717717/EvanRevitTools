@@ -156,6 +156,9 @@ namespace BIMDev_COBieAutomator
             }
         }
 
+        // ============================================================
+        // ★ 修改後：選擇 Revit 資料夾 (含數量統計與事件綁定)
+        // ============================================================
         private void BtnSelectRvtFolder_Click(object sender, RoutedEventArgs e)
         {
             WinForms.OpenFileDialog dialog = new WinForms.OpenFileDialog();
@@ -167,7 +170,7 @@ namespace BIMDev_COBieAutomator
             dialog.Filter = "資料夾|*.folder";
             dialog.RestoreDirectory = true;
 
-            // ★ 邏輯修正：如果沒有記憶，就強制回桌面
+            // 記憶路徑邏輯
             if (!string.IsNullOrEmpty(_lastRvtPath) && Directory.Exists(_lastRvtPath))
             {
                 dialog.InitialDirectory = _lastRvtPath;
@@ -186,15 +189,73 @@ namespace BIMDev_COBieAutomator
                 {
                     string[] files = Directory.GetFiles(selectedPath, "*.rvt");
                     ListRvtFiles.Items.Clear();
+
                     foreach (string f in files)
                     {
                         if (f.Contains(".00") && f.EndsWith(".rvt")) continue;
-                        CheckBox cb = new CheckBox { Content = Path.GetFileName(f), Tag = f, IsChecked = true };
+
+                        // 建立 CheckBox
+                        CheckBox cb = new CheckBox
+                        {
+                            Content = Path.GetFileName(f),
+                            Tag = f,
+                            IsChecked = true,
+                            Margin = new Thickness(2)
+                        };
+
+                        // ★ 關鍵：綁定點擊事件，讓手動勾選也能即時更新數量
+                        cb.Click += (s, args) => UpdateRvtCount();
+
                         ListRvtFiles.Items.Add(cb);
                     }
+
                     if (ListRvtFiles.Items.Count == 0) MessageBox.Show("該資料夾內沒有 Revit 模型");
+
+                    // ★ 載入完成後，立刻更新一次數量
+                    UpdateRvtCount();
                 }
             }
+        }
+        // ============================================================
+        // ★ 新增功能：Revit 清單全選/全不選與數量統計
+        // ============================================================
+
+        // 1. 更新數量顯示的輔助方法
+        private void UpdateRvtCount()
+        {
+            // 防止介面還沒初始化就執行
+            if (ListRvtFiles == null || TxtRvtCount == null) return;
+
+            int total = ListRvtFiles.Items.Count;
+            int selected = 0;
+
+            foreach (CheckBox cb in ListRvtFiles.Items)
+            {
+                if (cb.IsChecked == true) selected++;
+            }
+
+            // 更新介面文字
+            TxtRvtCount.Text = $"已選取: {selected} / {total}";
+        }
+
+        // 2. 全選按鈕事件
+        private void BtnSelectAllRvt_Click(object sender, RoutedEventArgs e)
+        {
+            foreach (CheckBox cb in ListRvtFiles.Items)
+            {
+                cb.IsChecked = true;
+            }
+            UpdateRvtCount(); // 更新數字
+        }
+
+        // 3. 全不選按鈕事件
+        private void BtnUnselectAllRvt_Click(object sender, RoutedEventArgs e)
+        {
+            foreach (CheckBox cb in ListRvtFiles.Items)
+            {
+                cb.IsChecked = false;
+            }
+            UpdateRvtCount(); // 更新數字
         }
 
 

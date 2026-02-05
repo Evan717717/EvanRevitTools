@@ -103,7 +103,28 @@
                         </GroupBox>
 
                         <GroupBox Header="待處理模型清單" Grid.Row="2" Margin="0,5">
-                            <ListBox Name="ListRvtFiles" Margin="2"/>
+                            <Grid Margin="0,5,0,0">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="*"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+
+                                <ListBox x:Name="ListRvtFiles" Grid.Row="0" MinHeight="100" MaxHeight="200" BorderBrush="Gray" BorderThickness="1" Margin="0,0,0,5"/>
+
+                                <Grid Grid.Row="1">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+
+                                    <Button x:Name="BtnSelectAllRvt" Content="全選" Click="BtnSelectAllRvt_Click" Width="60" Margin="0,0,5,0" Grid.Column="0"/>
+
+                                    <Button x:Name="BtnUnselectAllRvt" Content="全不選" Click="BtnUnselectAllRvt_Click" Width="60" Margin="0,0,10,0" Grid.Column="1"/>
+
+                                    <TextBlock x:Name="TxtRvtCount" Text="已選取: 0 / 0" VerticalAlignment="Center" HorizontalAlignment="Right" Foreground="Gray" Grid.Column="2"/>
+                                </Grid>
+                            </Grid>
                         </GroupBox>
 
                         <StackPanel Grid.Row="3">
