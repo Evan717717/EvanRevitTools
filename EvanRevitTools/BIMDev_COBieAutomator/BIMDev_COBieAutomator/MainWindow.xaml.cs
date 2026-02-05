@@ -378,8 +378,15 @@ namespace BIMDev_COBieAutomator
                     }
                     else
                     {
-                        // 如果不是工作共用檔，就直接存檔覆蓋回原路徑
+                        // 如果不是工作共用檔 (單機檔)
+                        // 1. 先存檔 (把記憶體中的變更寫入 Temp 檔)
+                        SaveOptions saveOpts = new SaveOptions() { Compact = true };
+                        bgDoc.Save(saveOpts);
+
+                        // 2. 再關閉
                         bgDoc.Close(false);
+
+                        // 3. 最後覆蓋回原路徑
                         File.Copy(tempLocalPath, rvtPath, true);
                         batchLog.AppendLine("   💾 單機檔已覆蓋儲存");
                     }
